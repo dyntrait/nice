@@ -1,0 +1,7 @@
+# This project uses rustfmt to format source code. Run `cargo +nightly fmt [-- --check]`.
+# https://github.com/rust-lang/rustfmt/blob/master/Configurations.md
+# rustfmt 会将导入语句按标准库、外部 crate 和当前 crate 模块分组（StdExternalCrate）。
+group_imports = "StdExternalCrate"
+# group_imports 决定分组顺序，而 imports_granularity 决定每组内的合并粒度。
+# use std::{fs, io, path::Path};
+imports_granularity = "Crate"

@@ -1,0 +1,21 @@
+[workspace]
+members = [
+    "crates/*",
+]
+
+# 共享的包元数据，所有成员自动继承
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourname/your-repo"
+authors = ["Your Name <you@example.com>"]
+
+# 共享依赖（子crate 可直接 workspace = true 引用）
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+yew = "0.21"
+trunk = "0.20"
+wasm-bindgen = "0.2"

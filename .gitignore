@@ -1,0 +1,83 @@
+
+*.o
+*.so
+*.exp
+*.obj
+*.lib
+*.xml
+
+# Git
+*.diff
+
+# Logs and patches
+*.log
+*.patch
+**log/
+**logs/
+
+# Profiler and database
+*.prof
+*.rdb
+*.sqlite
+
+# Secrets and environment files
+*.key
+*.key_secret
+*.env
+
+# Compressed files
+*.tar.gz*
+*.zip
+
+# Data
+*.parquet
+
+# IntelliJ and VSCode project
+*.iml
+.idea/
+.vscode/
+
+# Benchmarking and coverage
+.benchmarks*
+.coverage*
+
+# Rust related
+*target/
+
+# Python related
+*.pyc
+*.pyd
+.history*
+.cache/
+.codspeed/
+.mypy_cache/
+.profile/
+.pytest_cache/
+.python-version
+.ruff_cache/
+*dask-worker-space*
+__pycache__/
+cython_debug/
+requirements*
+venv*/
+
+
+# Build environment and temp
+_build/
+build/
+dist/
+env/
+*tmp/
+*temp/
+
+# System and editor specific
+.cursorignore
+.DS_Store
+.null-ls*
+AGENTS.md
+CLAUDE.md
+CODEX.md
+GEMINI.md
+PERF.JSON
+output.json
+
