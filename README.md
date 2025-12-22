@@ -1,3 +1,20 @@
+# 创建一个新的 Rust 库项目
+cargo new core --lib --name nice-core
+这是一个关于 Rust 项目组织架构的关键问题。
+
+在 Rust 中，每一个 Crate 必须有自己的 Cargo.toml。如果一个文件夹下没有 Cargo.toml，它在 Cargo 眼中就不是一个独立的编译单元（Crate）。
+
+如果你的 utils 文件夹下有多个子模块，但你不想为每个子模块都创建一个 Cargo.toml，那么这种结构在 Rust 中被称为**“单 Crate 多模块 (Single Crate with Multiple Modules)”**
+
+# cargo 管理crate version
+```shell
+cargo --list
+cargo install cargo-edit
+# 将整个工作空间内所有包的版本号统一改为 0.0.1
+cargo set-version 0.0.1
+
+```
+
 # <img src="https://github.com/nautechsystems/nautilus_trader/raw/develop/assets/nautilus-trader-logo.png" width="500">
 
 [![codecov](https://codecov.io/gh/nautechsystems/nautilus_trader/branch/master/graph/badge.svg?token=DXO9QQI40H)](https://codecov.io/gh/nautechsystems/nautilus_trader)
