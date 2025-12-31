@@ -1,6 +1,7 @@
 // -------------------------------------------------------------------------------------------------
 //  Copyright (c) 2015-2025 dyntrait. All rights reserved.
-//  @File         : lib.rs
+//
+//  @File         : consts.rs
 //  @Author       : mark.m
 //  @Description  :
 //
@@ -8,18 +9,15 @@
 //  You may not use this file except in compliance with the License.
 //  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
 // -------------------------------------------------------------------------------------------------
+//! Core constants.
 
+use std::env;
 
-#![warn(rustc::all)]
-#![deny(unsafe_code)]
-#![deny(unsafe_op_in_unsafe_fn)]
-#![deny(nonstandard_style)]
-#![deny(missing_debug_implementations)]
-#![deny(clippy::missing_errors_doc)]
-#![deny(clippy::missing_panics_doc)]
+/// The NautilusTrader string constant.
+pub static NICE_TRADER: &str = "NiceTrader";
 
-pub mod enums;
-pub mod logging;
+/// The NautilusTrader version string read from the top-level `pyproject.toml` at compile time.
+pub static NICE_VERSION: &str = env!("NICE_VERSION");
 
-pub mod testing;
-pub mod tracing;
+/// The NautilusTrader common User-Agent string including the current version at compile time.
+pub static NICE_USER_AGENT: &str = env!("NICE_USER_AGENT");

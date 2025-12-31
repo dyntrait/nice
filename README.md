@@ -1,4 +1,5 @@
 # 创建一个新的 Rust 库项目
+cd crates
 cargo new core --lib --name nice-core
 这是一个关于 Rust 项目组织架构的关键问题。
 

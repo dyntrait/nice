@@ -1,6 +1,18 @@
+// -------------------------------------------------------------------------------------------------
+//  Copyright (c) 2015-2025 dyntrait. All rights reserved.
+//
+//  @File         : uuid.rs
+//  @Author       : mark.m
+//  @Description  :
+//
+//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
+//  You may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
+// -------------------------------------------------------------------------------------------------
 //! A `UUID4` Universally Unique Identifier (UUID) version 4 (RFC 4122).
 
 use std::{
+    ffi::CStr,
     fmt::{Debug, Display, Formatter},
     hash::Hash,
     io::{Cursor, Write},
@@ -12,15 +24,15 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
 
 /// The maximum length of ASCII characters for a `UUID4` string value (includes null terminator).
-pub(crate) const UUID4_LEN: usize = 37;
+pub const UUID4_LEN: usize = 37;
 
 /// Represents a Universally Unique Identifier (UUID)
 /// version 4 based on a 128-bit label as specified in RFC 4122.
-
+#[repr(C)]
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
 pub struct UUID4 {
     /// The UUID v4 value as a fixed-length C string byte array (includes null terminator).
-    pub(crate) value: [u8; 37],
+    pub value: [u8; 37], // cbindgen issue using the constant in the array
 }
 
 impl UUID4 {
@@ -57,6 +69,17 @@ impl UUID4 {
         Self { value }
     }
 
+    /// Converts the [`UUID4`] to a C string reference.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal byte array is not a valid C string (does not end with a null terminator).
+    #[must_use]
+    pub fn to_cstr(&self) -> &CStr {
+        // SAFETY: We always store valid C strings
+        CStr::from_bytes_with_nul(&self.value)
+            .expect("UUID byte representation should be a valid C string")
+    }
 
     /// Returns the UUID as a string slice.
     #[must_use]
@@ -430,4 +453,3 @@ mod tests {
         assert_eq!(uuid1, uuid2);
     }
 }
-

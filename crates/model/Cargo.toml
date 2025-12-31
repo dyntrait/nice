@@ -1,75 +1,72 @@
 [package]
-name = "nice-core"
-readme = "README.md"
+name = "nice-model"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Core functionality for the Nice trading engine"
 categories.workspace = true
 keywords.workspace = true
 documentation.workspace = true
 repository.workspace = true
 homepage.workspace = true
+readme = "README.md"
+description = "Domain model for the Nice trading engine"
 
 
 [lints]
 workspace = true
 
 [lib]
-name = "nice_core"
+name = "nice_model"
 crate-type = ["rlib", "staticlib"]
 
 [features]
 default = []
-
+stubs = ["rstest"]
+high-precision = []
+# DeFi domain model requires 18-decimal wei precision, implying `high-precision`
+defi = ["alloy-primitives", "high-precision"]
 
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
+nice-core = { workspace = true }
+
 ahash = { workspace = true }
 anyhow = { workspace = true }
-bytes = { workspace = true }
 chrono = { workspace = true }
-heck = { workspace = true }
+derive_builder = { workspace = true }
+enum_dispatch = { workspace = true }
+evalexpr = { workspace = true }
+hex = { workspace = true }
+implied-vol = { workspace = true }
 indexmap = { workspace = true }
 log = { workspace = true }
-rand = { workspace = true }
-rmp-serde = { workspace = true }
 rust_decimal = { workspace = true }
+rust_decimal_macros = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+strum = { workspace = true }
+tabled = { workspace = true }
+thiserror = { workspace = true }
+thousands = { workspace = true }
 ustr = { workspace = true }
-uuid = { workspace = true }
+tracing = { workspace = true }
 
+alloy-primitives = { workspace = true, optional = true }
 
-strum = { workspace = true, optional = true }
+rstest = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
 iai = { workspace = true }
 proptest = { workspace = true }
 rstest = { workspace = true }
-static_assertions = { workspace = true }
 
 [build-dependencies]
-toml = { workspace = true }
 
-[[bench]]
-name = "correctness"
-path = "benches/correctness.rs"
-harness = false
 
-[[bench]]
-name = "time"
-path = "benches/time.rs"
-harness = false
-
-[[bench]]
-name = "uuid"
-path = "benches/uuid.rs"
-harness = false
 
