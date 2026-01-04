@@ -1,0 +1,47 @@
+// -------------------------------------------------------------------------------------------------
+//  Copyright (c) 2015-2026  dyntrait  All rights reserved.
+//  All Rights Reserved
+//
+//  @File         : error.rs
+//  @Author       : dyntrait
+//  @Description  : 
+//
+//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
+//  You may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
+// -------------------------------------------------------------------------------------------------
+//! HTTP client error types.
+
+/// Errors returned by the HTTP client.
+///
+/// Includes generic transport errors, timeouts, and proxy configuration errors.
+#[derive(thiserror::Error, Debug)]
+pub enum HttpClientError {
+    #[error("HTTP error occurred: {0}")]
+    Error(String),
+
+    #[error("HTTP request timed out: {0}")]
+    TimeoutError(String),
+
+    #[error("Invalid proxy URL: {0}")]
+    InvalidProxy(String),
+
+    #[error("Failed to build HTTP client: {0}")]
+    ClientBuildError(String),
+}
+
+impl From<reqwest::Error> for HttpClientError {
+    fn from(source: reqwest::Error) -> Self {
+        if source.is_timeout() {
+            Self::TimeoutError(source.to_string())
+        } else {
+            Self::Error(source.to_string())
+        }
+    }
+}
+
+impl From<String> for HttpClientError {
+    fn from(value: String) -> Self {
+        Self::Error(value)
+    }
+}

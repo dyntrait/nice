@@ -25,6 +25,7 @@
 //!
 //! The turmoil tests simulate various network conditions (reconnections, partitions, etc.) in a deterministic way,
 //! allowing reliable testing of network failure scenarios without flakiness.
+
 #![warn(rustc::all)]
 #![deny(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
@@ -33,6 +34,23 @@
 #![deny(clippy::missing_errors_doc)]
 #![deny(clippy::missing_panics_doc)]
 #![deny(rustdoc::broken_intra_doc_links)]
+
+pub mod backoff;
 pub mod http;
+pub mod mode;
+pub mod net;
+pub mod retry;
+pub mod socket;
+pub mod websocket;
 
+mod logging;
+mod tls;
 
+#[cfg(feature = "python")]
+pub mod python;
+
+pub mod error;
+pub mod ratelimiter;
+
+/// Sentinel message to signal reconnection completion to Rust consumers.
+pub const RECONNECTED: &str = "__RECONNECTED__";

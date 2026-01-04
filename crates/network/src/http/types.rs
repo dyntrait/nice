@@ -102,10 +102,6 @@ impl TryFrom<u16> for HttpStatus {
 
 /// Represents the HTTP methods supported by the `HttpClient`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(eq, eq_int, module = "nautilus_trader.core.nautilus_pyo3.network")
-)]
 pub enum HttpMethod {
     GET,
     POST,
@@ -131,10 +127,6 @@ impl From<HttpMethod> for Method {
 /// This struct encapsulates the status, headers, and body of an HTTP response,
 /// providing easy access to the key components of the response.
 #[derive(Clone, Debug)]
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nautilus_trader.core.nautilus_pyo3.network")
-)]
 pub struct HttpResponse {
     /// The HTTP status code.
     pub status: HttpStatus,

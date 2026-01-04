@@ -1,5 +1,5 @@
 // -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2025  dyntrait  All rights reserved.
+//  Copyright (c) 2015-2026  dyntrait  All rights reserved.
 //  All Rights Reserved
 //
 //  @File         : mod.rs
@@ -10,14 +10,15 @@
 //  You may not use this file except in compliance with the License.
 //  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
 // -------------------------------------------------------------------------------------------------
-//! A high-performance HTTP client implementation.
+
+//! High-performance raw TCP client implementation with TLS capability, automatic reconnection
+//! with exponential backoff and state management.
 
 pub mod client;
-pub mod error;
+pub mod config;
+pub mod fix;
 pub mod types;
 
-// Re-exports
-pub use client::{HttpClient, InnerHttpClient};
-pub use error::HttpClientError;
-pub use reqwest::{Error as ReqwestError, Method, Response, StatusCode, Url, header::USER_AGENT};
-pub use types::{HttpMethod, HttpResponse, HttpStatus};
+pub use client::SocketClient;
+pub use config::SocketConfig;
+pub use types::{TcpMessageHandler, TcpReader, TcpWriter, WriterCommand};
