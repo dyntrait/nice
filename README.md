@@ -16,6 +16,13 @@ cargo set-version 0.0.1
 
 ```
 
+
+# Cargo.toml依赖更新到最新
+```shell
+cargo install cargo-edit
+cargo upgrade
+```
+
 # <img src="https://github.com/nautechsystems/nautilus_trader/raw/develop/assets/nautilus-trader-logo.png" width="500">
 
 [![codecov](https://codecov.io/gh/nautechsystems/nautilus_trader/branch/master/graph/badge.svg?token=DXO9QQI40H)](https://codecov.io/gh/nautechsystems/nautilus_trader)

@@ -2,7 +2,7 @@
 //  Copyright (c) 2015-2025 dyntrait. All rights reserved.
 //
 //  @File         : serialization.rs
-//  @Author       : mark.m
+//  @Author       : dyntrait
 //  @Description  :
 //
 //  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");

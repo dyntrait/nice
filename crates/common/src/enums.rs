@@ -2,7 +2,7 @@
 //  Copyright (c) 2015-2025 dyntrait. All rights reserved.
 //
 //  @File         : enums.rs
-//  @Author       : mark.m
+//  @Author       : dyntrait
 //  @Description  :
 //
 // -------------------------------------------------------------------------------------------------

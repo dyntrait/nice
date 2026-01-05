@@ -1,0 +1,97 @@
+// -------------------------------------------------------------------------------------------------
+//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
+//
+//  @File         : component.rs.rs
+//  @Author       : dyntrait Created On 2026/1/5 16:13
+//  @Description  : 
+//
+//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
+//  You may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
+// -------------------------------------------------------------------------------------------------
+
+use std::{
+    any::Any,
+    fmt::{Debug, Display},
+};
+
+use indexmap::IndexMap;
+use nice_core::{UUID4, UnixNanos};
+use nice_model::identifiers::TraderId;
+use serde::{Deserialize, Serialize};
+use ustr::Ustr;
+
+use crate::enums::ComponentState;
+
+/// Represents an event which includes information on the state of a component.
+#[repr(C)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type")]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nice_trader.core.nice_pyo3.model")
+)]
+pub struct ComponentStateChanged {
+    /// The trader ID associated with the event.
+    pub trader_id: TraderId,
+    /// The component ID associated with the event.
+    pub component_id: Ustr,
+    /// The component type.
+    pub component_type: Ustr,
+    /// The component state.
+    pub state: ComponentState,
+    /// The component configuration.
+    pub config: IndexMap<String, String>,
+    /// The event ID.
+    pub event_id: UUID4,
+    /// UNIX timestamp (nanoseconds) when the event occurred.
+    pub ts_event: UnixNanos,
+    /// UNIX timestamp (nanoseconds) when the instance was initialized.
+    pub ts_init: UnixNanos,
+}
+
+impl ComponentStateChanged {
+    /// Creates a new [`ComponentStateChanged`] instance.
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    pub fn new(
+        trader_id: TraderId,
+        component_id: Ustr,
+        component_type: Ustr,
+        state: ComponentState,
+        config: IndexMap<String, String>,
+        event_id: UUID4,
+        ts_event: UnixNanos,
+        ts_init: UnixNanos,
+    ) -> Self {
+        Self {
+            trader_id,
+            component_id,
+            component_type,
+            state,
+            config,
+            event_id,
+            ts_event,
+            ts_init,
+        }
+    }
+
+    pub fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Display for ComponentStateChanged {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}(trader_id={}, component_id={}, component_type={}, state={}, event_id={})",
+            stringify!(ComponentStateChanged),
+            self.trader_id,
+            self.component_id,
+            self.component_type,
+            self.state,
+            self.event_id,
+        )
+    }
+}

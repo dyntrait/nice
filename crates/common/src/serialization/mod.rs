@@ -9,3 +9,7 @@
 //  You may not use this file except in compliance with the License.
 //  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
 // -------------------------------------------------------------------------------------------------
+//! Serialization implementations for Nautilus common types.
+
+#[cfg(feature = "capnp")]
+pub mod capnp;

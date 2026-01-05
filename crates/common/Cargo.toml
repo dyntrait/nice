@@ -32,7 +32,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 nice-core = { workspace = true }
-nice-model = { workspace = true, features = ["stubs"] }
+nice-model = { workspace = true, features = ["stubs","defi"] }
 nice-indicators = { workspace = true, optional = true }
 ahash = { workspace = true }
 anyhow = { workspace = true }

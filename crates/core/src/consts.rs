@@ -2,7 +2,7 @@
 //  Copyright (c) 2015-2025 dyntrait. All rights reserved.
 //
 //  @File         : consts.rs
-//  @Author       : mark.m
+//  @Author       : dyntrait
 //  @Description  :
 //
 //  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
@@ -21,3 +21,6 @@ pub static NICE_VERSION: &str = env!("NICE_VERSION");
 
 /// The NautilusTrader common User-Agent string including the current version at compile time.
 pub static NICE_USER_AGENT: &str = env!("NICE_USER_AGENT");
+
+/// Prefix for log messages outside the main logging subsystem.
+pub static NICE_PREFIX: &str = "[NICE]";
