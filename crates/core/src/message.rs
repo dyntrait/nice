@@ -9,10 +9,17 @@
 //  You may not use this file except in compliance with the License.
 //  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
 // -------------------------------------------------------------------------------------------------
-
 //! Common message types.
+//!
+//! The [`Params`] type uses `IndexMap<String, String>` for consistent ordering
+//! and simpler, predictable serialization.
+
+use indexmap::IndexMap;
 
 use crate::{UUID4, UnixNanos};
+
+/// Additional parameters for messages.
+pub type Params = IndexMap<String, String>;
 
 /// Represents different types of messages in the system.
 #[derive(Debug, Clone)]

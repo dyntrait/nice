@@ -21,6 +21,85 @@ use super::{
     PositionId, StrategyId, Symbol, TradeId, TraderId, Venue, VenueOrderId,
 };
 
+use crate::stubs::TestDefault;
+
+impl TestDefault for AccountId {
+    /// Creates a new test default [`AccountId`] instance.
+    fn test_default() -> Self {
+        Self::from("SIM-001")
+    }
+}
+
+impl TestDefault for ClientId {
+    /// Creates a new test default [`ClientId`] instance.
+    fn test_default() -> Self {
+        Self::from("SIM")
+    }
+}
+
+impl TestDefault for ClientOrderId {
+    /// Creates a new test default [`ClientOrderId`] instance.
+    fn test_default() -> Self {
+        Self::from("O-19700101-000000-001-001-1")
+    }
+}
+
+impl TestDefault for PositionId {
+    /// Creates a new test default [`PositionId`] instance.
+    fn test_default() -> Self {
+        Self::from("P-001")
+    }
+}
+
+impl TestDefault for StrategyId {
+    /// Creates a new test default [`StrategyId`] instance.
+    fn test_default() -> Self {
+        Self::from("S-001")
+    }
+}
+
+impl TestDefault for TradeId {
+    /// Creates a new test default [`TradeId`] instance.
+    fn test_default() -> Self {
+        Self::from("1")
+    }
+}
+
+impl TestDefault for TraderId {
+    /// Creates a new test default [`TraderId`] instance.
+    fn test_default() -> Self {
+        Self::default()
+    }
+}
+
+impl TestDefault for Symbol {
+    /// Creates a new test default [`Symbol`] instance.
+    fn test_default() -> Self {
+        Self::from("AUD/USD")
+    }
+}
+
+impl TestDefault for Venue {
+    /// Creates a new test default [`Venue`] instance.
+    fn test_default() -> Self {
+        Self::from("SIM")
+    }
+}
+
+impl TestDefault for VenueOrderId {
+    /// Creates a new test default [`VenueOrderId`] instance.
+    fn test_default() -> Self {
+        Self::from("001")
+    }
+}
+
+impl TestDefault for InstrumentId {
+    /// Creates a new test default [`InstrumentId`] instance.
+    fn test_default() -> Self {
+        Self::new(Symbol::test_default(), Venue::test_default())
+    }
+}
+
 /// Returns a stub trader ID.
 #[fixture]
 pub fn trader_id() -> TraderId {

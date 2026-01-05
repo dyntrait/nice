@@ -17,10 +17,34 @@
 #![deny(missing_debug_implementations)]
 #![deny(clippy::missing_errors_doc)]
 #![deny(clippy::missing_panics_doc)]
+#![deny(rustdoc::broken_intra_doc_links)]
 
+pub mod actor;
+pub mod cache;
+pub mod clock;
+pub mod component;
+pub mod custom;
 pub mod enums;
+pub mod factories;
+pub mod generators;
+pub mod greeks;
 pub mod logging;
-
+pub mod messages;
+pub mod msgbus;
+pub mod runner;
+pub mod signal;
 pub mod testing;
-pub mod tracing;
-mod msgbus;
+pub mod throttler;
+pub mod timer;
+pub mod xrate;
+
+#[cfg(feature = "live")]
+pub mod live;
+
+#[cfg(feature = "defi")]
+pub mod defi;
+
+
+
+#[cfg(feature = "capnp")]
+pub mod serialization;

@@ -33,6 +33,8 @@ pub mod paths;
 pub mod serialization;
 pub mod shared;
 pub mod string;
+pub mod formatting;
+pub mod stack_str;
 
 // Re-exports
 pub use crate::{
@@ -40,7 +42,9 @@ pub use crate::{
     time::AtomicTime,
     drop::CleanDrop,
     uuid::UUID4,
-    shared::{SharedCell,WeakCell}
+    shared::{SharedCell,WeakCell},
+    message::Params,
+    stack_str::{STACKSTR_CAPACITY, StackStr},
 
 };
 

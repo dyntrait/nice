@@ -1,0 +1,35 @@
+// -------------------------------------------------------------------------------------------------
+//  Copyright (c) 2015-2026  dyntrait  All rights reserved.
+//  All Rights Reserved
+//
+//  @File         : mod.rs
+//  @Author       : dyntrait
+//  @Description  : 
+//
+//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
+//  You may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
+// -------------------------------------------------------------------------------------------------
+
+
+//! Value types for the trading domain model such as `Price`, `Quantity` and `Money`.
+
+pub mod balance;
+pub mod currency;
+pub mod fixed;
+pub mod money;
+pub mod price;
+pub mod quantity;
+
+#[cfg(any(test, feature = "stubs"))]
+pub mod stubs;
+
+// Re-exports
+pub use balance::{AccountBalance, MarginBalance};
+pub use currency::Currency;
+pub use money::{MONEY_MAX, MONEY_MIN, Money};
+pub use price::{
+    ERROR_PRICE, PRICE_ERROR, PRICE_MAX, PRICE_MIN, PRICE_RAW_MAX, PRICE_RAW_MIN, PRICE_UNDEF,
+    Price,
+};
+pub use quantity::{QUANTITY_MAX, QUANTITY_MIN, QUANTITY_UNDEF, Quantity};
