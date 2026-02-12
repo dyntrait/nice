@@ -1,0 +1,182 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug unit tests in library 'raptor'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--package=raptor"
+                ]
+            }
+        },
+        {
+            "name": "Debug executable 'raptor'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "run",
+                    "--bin=raptor",
+                    "--package=raptor"
+                ]
+            },
+            "args": []
+        },
+        {
+            "name": "Debug unit tests in executable 'raptor'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--bin=raptor",
+                    "--package=raptor"
+                ]
+            }
+        },
+        {
+            "name": "Debug unit tests in library 'nice_common'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--package=nice-common"
+                ]
+            }
+        },
+        {
+            "name": "Debug benchmark 'cache_orders'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--bench=cache_orders",
+                    "--package=nice-common"
+                ]
+            }
+        },
+        {
+            "name": "Debug benchmark 'cache_query_sets'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--bench=cache_query_sets",
+                    "--package=nice-common"
+                ]
+            }
+        },
+        {
+            "name": "Debug benchmark 'matching'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--bench=matching",
+                    "--package=nice-common"
+                ]
+            }
+        },
+        {
+            "name": "Debug unit tests in library 'nice_core'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--package=nice-core"
+                ]
+            }
+        },
+        {
+            "name": "Debug benchmark 'correctness'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--bench=correctness",
+                    "--package=nice-core"
+                ]
+            }
+        },
+        {
+            "name": "Debug benchmark 'time'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--bench=time",
+                    "--package=nice-core"
+                ]
+            }
+        },
+        {
+            "name": "Debug benchmark 'uuid'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--bench=uuid",
+                    "--package=nice-core"
+                ]
+            }
+        },
+        {
+            "name": "Debug unit tests in library 'nice_indicators'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--package=nice-indicators"
+                ]
+            }
+        },
+        {
+            "name": "Debug unit tests in library 'nice_model'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--package=nice-model"
+                ]
+            }
+        },
+        {
+            "name": "Debug unit tests in library 'nice_cryptography'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--package=nice-cryptography"
+                ]
+            }
+        },
+        {
+            "name": "Debug unit tests in library 'nice_network'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--package=nice-network"
+                ]
+            }
+        }
+    ]
+}

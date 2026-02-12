@@ -34,8 +34,7 @@
 
 # IntelliJ and VSCode project
 *.iml
-.idea/
-.vscode/
+
 
 # Benchmarking and coverage
 .benchmarks*
