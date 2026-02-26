@@ -28,6 +28,11 @@ pub const UUID4_LEN: usize = 37;
 
 /// Represents a Universally Unique Identifier (UUID)
 /// version 4 based on a 128-bit label as specified in RFC 4122.
+/// repr 是 "Representation"（表示、布局）的缩写,请按照指定的某种规则来安排这个类型在内存中各字段的先后顺序和对齐方式
+/// Rust 编译器为了优化性能，默认会对结构体字段进行重排（Field Reordering），以减少内存对齐带来的空白填充。但是，C 语言的内存布局是确定的（按定义顺序，遵循 C 的对齐规则）。
+/// 如果 Rust 需要把一个结构体传递给 C 语言写的库（比如你在前面看到的 staticlib 场景），就必须使用 #[repr(C)] 来保证双方对内存的理解是一致的
+/// 使用 #[repr(C)] 后，结构体字段的排列顺序严格按照代码中定义的顺序，对齐方式也与 C 标准一致。这在编写底层系统代码、序列化或与硬件交互时非常重要
+
 #[repr(C)]
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
 pub struct UUID4 {
@@ -42,25 +47,28 @@ impl UUID4 {
     #[must_use]
     pub fn new() -> Self {
         let mut rng = rand::rng();
-        let mut bytes = [0u8; 16];
+        let mut bytes = [0u8; 16];  //uuid实际是一个128位数字 16*8=128位
         rng.fill_bytes(&mut bytes);
-
+        // 版本 4：基于随机数 (UUIDv4) 理论上存在碰撞的可能，但由于位数极多（$2^{128}$），在实际应用中碰撞的概率低到可以忽略不计。它是目前应用最广泛的 UUID 类型
         bytes[6] = (bytes[6] & 0x0F) | 0x40; // Set the version to 4
         bytes[8] = (bytes[8] & 0x3F) | 0x80; // Set the variant to RFC 4122
 
         let mut value = [0u8; UUID4_LEN];
+        // Cursor 是一种零成本抽象（Zero-cost abstraction）。它利用 Rust 的特征系统，在不改变底层数据结构的前提下，为内存操作提供了与文件 I/O 一致的接口，极大地简化了数据的读写、定位和格式化操作
+        // 它是一个包装器（Wrapper），用于将普通的内存块（如字节数组 [u8] 或 Vec<u8>）包装成一个逻辑上的文件
         let mut cursor = Cursor::new(&mut value[..36]);
-
+        // UUID 以 32 个十六进制数字表示，以连字符分隔成 5 组 550e8400-e29b-41d4-a716-446655440000
+        // UUID 的 8-4-4-4-12 标准十六进制格式 08x: 表示十六进制格式，宽度为 8，如果不够，前面补 0
         write!(
             cursor,
             "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
-            u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
-            u16::from_be_bytes([bytes[4], bytes[5]]),
+            u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]), // u32::from_be_bytes(...): UUID 的前 4 个字节被视为一个大端序（Big-Endian）的 32 位无符号整数
+            u16::from_be_bytes([bytes[4], bytes[5]]), // 分组 2, 3, 4 分别是 2 字节的大端序无符号整数
             u16::from_be_bytes([bytes[6], bytes[7]]),
             u16::from_be_bytes([bytes[8], bytes[9]]),
             u64::from_be_bytes([
                 bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15], 0, 0
-            ]) >> 16
+            ]) >> 16 // 最后 6 个字节加上两个 0 组成 8 字节，视为 u64，然后右移 16 位，截取高 6 字节作为最后的 12 个十六进制字符
         )
             .expect("Error writing UUID string to buffer");
 
@@ -98,10 +106,11 @@ impl UUID4 {
         // This is done once at read time to avoid repeated parsing
         let uuid_str = self.to_cstr().to_str().expect("Valid UTF-8");
         let uuid = Uuid::parse_str(uuid_str).expect("Valid UUID4");
-        *uuid.as_bytes()
+        *(uuid.as_bytes())
     }
 
     fn validate_v4(uuid: &Uuid) {
+        // 无论在什么模式下编译，assert_eq! 都会被包含在生成的二进制文件中。
         // Validate this is a v4 UUID
         assert_eq!(
             uuid.get_version(),
@@ -125,7 +134,7 @@ impl UUID4 {
         Self { value }
     }
 }
-
+// std::str::FromStr 必须处理错误 返回 Err，让调用者决定如何处理
 impl FromStr for UUID4 {
     type Err = uuid::Error;
 
@@ -143,6 +152,7 @@ impl FromStr for UUID4 {
     }
 }
 
+// From<&str> (来自于 std::convert::From) 不应该失败 引发 Panic (引发崩溃)
 impl From<&str> for UUID4 {
     /// Creates a [`UUID4`] from a string slice.
     ///
@@ -197,13 +207,13 @@ impl Default for UUID4 {
 
 impl Debug for UUID4 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}({})", stringify!(UUID4), self)
+        write!(f, "{}({})", stringify!(UUID4), self) // stringify!(UUID4) 会被替换为 "UUID4" 仅仅是把变量的值转为字符串，它是把你写在括号里的那段代码字面量转为字符串
     }
 }
 
 impl Display for UUID4 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_cstr().to_string_lossy())
+        write!(f, "{}", self.to_cstr().to_string_lossy())  // 非法的 UTF-8：如果 C 字符串内部包含不合法的 UTF-8 字节序列（例如 C 语言可能允许的非法编码），to_string_lossy() 会把这些字节替换为 ``，从而丢失了原始的非法字节信息
     }
 }
 
@@ -214,6 +224,8 @@ impl Serialize for UUID4 {
     {
         self.to_string().serialize(serializer)
     }
+    // to_string() 是 std::string::ToString 特征（Trait）中定义的方法 该类型必须实现了 std::fmt::Display 特征
+    // 当你调用 to_string() 时，Rust 会在后台调用 fmt::Display::fmt 方法，将你的数据按照“用户友好”的格式渲染到内存中，并将其封装成一个 String 对象
 }
 
 impl<'de> Deserialize<'de> for UUID4 {
@@ -221,6 +233,10 @@ impl<'de> Deserialize<'de> for UUID4 {
     where
         D: Deserializer<'de>,
     {
+        // &str 不是未卜先知得到的，而是序列化器（Deserializer）被要求寻找一个字符串，然后它在数据源中找到并直接“借用”了这块内存的结果
+        // Rust 编译器看到这个明确的类型标注，就会推断出你要求 Deserialize::deserialize(deserializer) 方法返回一个 &str
+        // 你没有在“未卜先知”，你是在向反序列化器发出一项具体的请求：“请给我一个指向原始数据中字符串部分的引用”。
+        // 如果序列化器无法做到（例如数据是被压缩或编码过的，必须先解压才能找到字符串），serde 就会在运行时报错
         let uuid4_str: &str = Deserialize::deserialize(deserializer)?;
         let uuid4: Self = uuid4_str.into();
         Ok(uuid4)
