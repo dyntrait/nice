@@ -10,10 +10,11 @@
 //  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
 // -------------------------------------------------------------------------------------------------
 //! Number formatting utilities.
-
+/// 这个函数的作用是为数字字符串添加千分位分隔符（或其他自定义分隔符），同时能够妥善处理负号和小数部分。
+/// 调用 separate_with("1234567.89", ',') 会返回 "1,234,567.89"
 fn separate_with(s: &str, sep: char) -> String {
     let (neg, digits) = if let Some(rest) = s.strip_prefix('-') {
-        (true, rest)
+        (true, rest) //  如果有负号，记录下来并剥离它
     } else {
         (false, s)
     };

@@ -21,7 +21,7 @@ use std::path::PathBuf;
 /// Panics if the `CARGO_MANIFEST_DIR` environment variable is not set or its parent directory cannot be determined.
 #[must_use]
 pub fn get_workspace_root_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")) // 在 Rust 的开发生态中，CARGO_MANIFEST_DIR 是一个非常实用的环境变量，它由 Cargo 在编译时自动设置。
         .parent()
         .expect("Failed to get project root")
         .to_path_buf()

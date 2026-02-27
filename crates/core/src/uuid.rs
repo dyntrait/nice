@@ -159,6 +159,8 @@ impl From<&str> for UUID4 {
     /// # Panics
     ///
     /// Panics if the `value` string is not a valid UUID version 4 RFC 4122.
+    //  只要类型 T 实现了 FromStr，字符串就可以调用 parse() 转为 T
+    // fn parse<T: FromStr>(&self) -> Result<T, T::Err>;
     fn from(value: &str) -> Self {
         value
             .parse()
