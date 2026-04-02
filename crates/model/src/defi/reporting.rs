@@ -14,7 +14,7 @@
 
 use std::{fmt::Display, time::Instant};
 
-use nautilus_core::formatting::Separable;
+use nice_core::formatting::Separable;
 
 #[derive(Debug, Clone)]
 pub enum BlockchainSyncReportItems {

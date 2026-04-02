@@ -18,7 +18,7 @@ pub mod base;
 pub mod cash;
 pub mod margin;
 
-#[cfg(any(test, feature = "stubs"))]
+#[cfg(any(test, feature = "stubs"))] //只要上述两个条件(test,feature = "stubs") 中有一个满足，编译器就会处理 pub mod stubs; 这行代码。
 pub mod stubs;
 
 use ahash::AHashMap;

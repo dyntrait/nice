@@ -16,7 +16,7 @@
 macro_rules! impl_serialization_for_identifier {
     ($ty:ty) => {
         impl Serialize for $ty {
-            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> // S：代表 Serializer（序列化器）。它是一个泛型，可以是 JsonSerializer、BincodeSerializer 或 YamlSerializer 等
             where
                 S: Serializer,
             {

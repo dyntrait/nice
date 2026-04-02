@@ -11,8 +11,7 @@
 //  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
 // -------------------------------------------------------------------------------------------------
 
-use tracing_subscriber::Layer;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use strum::{AsRefStr, Display, EnumString};
@@ -27,10 +26,13 @@ use tracing_subscriber::{
         FormatFields,
         MakeWriter,
     },
+    Layer,
     EnvFilter,
     Registry,
     layer::SubscriberExt,
+    util::SubscriberInitExt
 };
+
 
 
 #[allow(unused)]
@@ -120,6 +122,7 @@ pub struct LogConfig {
     pub is_colored: bool,
     #[serde(default)]
     pub print_config: bool,
+    #[serde(flatten)]
     pub file_writer: Option<FileWriterConfig>,
 }
 impl LogConfig {
@@ -200,12 +203,12 @@ where
         mut writer: Writer<'_>,
         event: &Event<'_>,
     ) -> std::fmt::Result {
-        let metadata = event.metadata();
+        let metadata = event.metadata(); // 这个结构体包含了编译器在编译阶段就能确定的、关于这条日志产生位置的所有静态信息
 
         // 2. 【核心修改】使用保存在 self 中的时间格式
         // 这里使用 .format(&self.time_format) 动态解析
         let now = chrono::Local::now();
-        write!(writer, "{} ", now.format(&self.time_format))?;
+        write!(writer, "{} ", now.format(&self.time_format))?; // 右对齐，占 5 个字符宽度
 
         // --- 以下逻辑保持不变 ---
         let level = metadata.level();
@@ -214,17 +217,80 @@ where
         if let (Some(file), Some(line)) = (metadata.file(), metadata.line()) {
             let short_file = file.rfind('/').map(|i| &file[i + 1..]).unwrap_or(file);
             write!(writer, "[{}:{}] ", short_file, line)?;
-        } else {
+        }else{
             write!(writer, "[{}] ", metadata.target())?;
         }
 
-        ctx.format_fields(writer.by_ref(), event)?;
+        ctx.format_fields(writer.by_ref(), event)?;//info!("message", key = value) 里的 message 和 key = value 渲染出来。它调用了默认的字段格式化器
         writeln!(writer)
     }
 }
 
 /// --- 自定义格式器：JSON 模式，输出 {"file_line": "short_file:line", "message": "..."} ---
 
+
+use tracing::field::{Field, Visit};
+
+// 1. 修改 Visitor 的定义：让它直接持有一个能写的地方
+struct JsonVisitor<'a, 'b> {
+    // Writer<'_> 本身就是一个包装引用，我们直接持有它的可变借用
+    writer: &'a mut Writer<'b>,
+    is_first: bool,
+    result: std::fmt::Result, // 增加一个字段记录写入过程中的错误
+}
+
+impl<'a, 'b> Visit for JsonVisitor<'a, 'b> {
+    // 1. 处理基础类型（数字、布尔不加引号）
+    fn record_i64(&mut self, field: &Field, value: i64) {
+        self.write_pair(field.name(), value.to_string(), false);
+    }
+
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        self.write_pair(field.name(), value.to_string(), false);
+    }
+
+    fn record_bool(&mut self, field: &Field, value: bool) {
+        self.write_pair(field.name(), value.to_string(), false);
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        // 关键逻辑：探测字符串是否为有效的 JSON 对象或数组
+        let is_json = (value.starts_with('{') && value.ends_with('}')) ||
+            (value.starts_with('[') && value.ends_with(']'));
+
+        self.write_pair(field.name(), value.to_string(), !is_json);
+    }
+
+    fn record_error(&mut self, field: &Field,  value: &(dyn std::error::Error + 'static)) {
+        self.write_pair(field.name(), value.to_string(), false);
+    }
+
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        let debug_str = format!("{:?}", value);
+        // 探测 Debug 输出是否已经是合法的 JSON 格式
+        let is_json = (debug_str.starts_with('{') && debug_str.ends_with('}')) ||
+            (debug_str.starts_with('[') && debug_str.ends_with(']'));
+
+        self.write_pair(field.name(), debug_str, !is_json);
+    }
+}
+
+impl<'a, 'b> JsonVisitor<'a, 'b> {
+    // 统一写入逻辑：need_quotes 控制是否包裹双引号
+    fn write_pair(&mut self, name: &str, value: String, need_quotes: bool) {
+        if self.result.is_err() { return; }
+        let prefix = if self.is_first { "" } else { "," };
+
+        if need_quotes {
+            // 普通字符串：加引号
+            self.result = write!(self.writer, "{}\"{}\":\"{}\"", prefix, name, value);
+        } else {
+            // 数字、布尔、或已经是 JSON 的内容：不加引号
+            self.result = write!(self.writer, "{}\"{}\":{}", prefix, name, value);
+        }
+        self.is_first = false;
+    }
+}
 
 #[derive(Debug, Clone)]
 struct JsonShortFileLineFormatter {
@@ -244,7 +310,7 @@ where
 {
     fn format_event(
         &self,
-        ctx: &FmtContext<'_, S, N>,
+        _ctx: &FmtContext<'_, S, N>,
         mut writer: Writer<'_>,
         event: &Event<'_>,
     ) -> std::fmt::Result {
@@ -252,32 +318,40 @@ where
 
         // 1. 获取自定义格式的时间戳
         let now = chrono::Local::now();
-        let formatted_time = now.format(&self.time_format);
 
-        // 2. 路径处理优化：使用 rfind 避免迭代器开销
-        let filename = metadata.file()
-            .and_then(|f| f.rfind('/').map(|i| &f[i + 1..]).or(Some(f)))
-            .unwrap_or("unknown");
+        // 2.优化文件名提取：避免多次 slice 检查
+        let file_info = metadata.file().map(|f| {
+            let i = f.rfind('/').map(|idx| idx + 1).unwrap_or(0);
+            &f[i..]
+        }).unwrap_or("unknown");
         let line = metadata.line().unwrap_or(0);
 
         // 3. 开始构建 JSON (直接写入 writer，零中间 String 分配)
         // 包含时间戳、日志级别、文件位置
         write!(
             writer,
-            "{{\"time\":\"{}\",\"level\":\"{}\",\"file_line\":\"{}:{}\",\"message\":\"",
-            formatted_time,
+            "{{\"time\":\"{}\",\"level\":\"{}\",\"file\":\"{}:{}\"", // 注意末尾是逗号
+            now.format(&self.time_format),
             metadata.level(),
-            filename,
+            file_info,
             line
         )?;
+        //ctx.format_fields(writer.by_ref(), event)?;
+        // 重点：使用我们的 Visitor 遍历所有字段（包括 message）
+        // 初始化 Visitor，直接把局部变量 writer 的可变引用传进去
+        let mut visitor = JsonVisitor {
+            writer: &mut writer, // 这里的生命周期现在是正确的
+            is_first: false,
+            result: Ok(()),
+        };
+        // 运行访问者
+        event.record(&mut visitor);
 
-        // 4. 核心优化：直接流式写入消息字段
-        // 注意：如果 event 里的字段包含引号，这里可能需要处理转义。
-        // 对于量化系统，如果追求极致性能且消息受控，这样直接写入是最快的。
-        ctx.format_fields(writer.by_ref(), event)?;
+        // 检查访问过程中是否有错误
+        visitor.result?;
 
         // 5. 闭合 JSON 结构
-        writeln!(writer, "\"}}")
+        writeln!(writer, "}}")
     }
 }
 
@@ -306,7 +380,7 @@ where
 }
 
 pub fn init_trace_logging(config: &LogConfig) -> Result<LogGuard> {
-    // 1. 原子检查单例
+    // 1. 原子检查单例：确保全局唯一初始化
     if TRACING_LOGGER_IN_USE
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
@@ -314,45 +388,58 @@ pub fn init_trace_logging(config: &LogConfig) -> Result<LogGuard> {
         return Err(anyhow::anyhow!("Logger is already initialized"));
     }
 
-    let mut guards = Vec::new();
+    let mut worker_guards = Vec::new();
 
-    // --- A. 控制台 Layer ---
+    // --- A. 控制台输出层 ---
     let console_layer = if matches!(config.mode, LogMode::Console | LogMode::Both) {
-        let (nb_stdout, guard) = tracing_appender::non_blocking(std::io::stdout());
-        guards.push(guard);
+        let (stdout_writer, guard) = tracing_appender::non_blocking(std::io::stdout());
+        worker_guards.push(guard);
 
-        Some(build_formatted_layer(nb_stdout, config)
-            .with_filter(EnvFilter::from(config.stdout_level.to_lowercase())))
+        let filter = EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| EnvFilter::new(&config.stdout_level));
+
+        Some(build_formatted_layer(stdout_writer, config).with_filter(filter))
     } else {
         None
     };
 
-    // --- B & C. 文件 Layer ---
-    let (file_layer, error_file_layer) = if matches!(config.mode, LogMode::File | LogMode::Both) {
-        if let Some(fw_config) = &config.file_writer {
-            // 闭包：根据文件名创建 Appender
-            let mut create_appender = |name: String| {
-                let appender = match fw_config.rotate.rotation {
-                    RotationRule::Daily => tracing_appender::rolling::daily(&fw_config.directory, name),
-                    RotationRule::Hourly => tracing_appender::rolling::hourly(&fw_config.directory, name),
-                    RotationRule::Never => tracing_appender::rolling::never(&fw_config.directory, name),
+    // --- B & C. 文件输出层 ---
+    let (primary_file_layer, error_file_layer) = if matches!(config.mode, LogMode::File | LogMode::Both) {
+        if let Some(file_config) = &config.file_writer {
+
+            // 闭包：使用 &str 避免 String 的分配开销
+            let mut create_writer = |file_suffix: &str| {
+                let full_name = if file_suffix.is_empty() {
+                    file_config.file_name.clone()
+                } else {
+                    format!("{}.{}", file_suffix, file_config.file_name)
                 };
-                let (nb, guard) = tracing_appender::non_blocking(appender);
-                guards.push(guard);
-                nb
+
+                let appender = match file_config.rotate.rotation {
+                    RotationRule::Daily => tracing_appender::rolling::daily(&file_config.directory, full_name),
+                    RotationRule::Hourly => tracing_appender::rolling::hourly(&file_config.directory, full_name),
+                    RotationRule::Never => tracing_appender::rolling::never(&file_config.directory, full_name),
+                };
+
+                let (writer, guard) = tracing_appender::non_blocking(appender);
+                worker_guards.push(guard);
+                writer
             };
 
-            // 创建主日志层
-            let main_nb = create_appender(fw_config.file_name.clone());
-            let f_layer = build_formatted_layer(main_nb, config)
-                .with_filter(EnvFilter::from(config.file_level.to_lowercase()));
+            // 1. 构建主日志层 (Primary Layer)
+            let primary_writer = create_writer("");
+            let primary_filter = EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new(&config.file_level));
 
-            // 创建错误日志层
-            let err_nb = create_appender(format!("error.{}", fw_config.file_name));
-            let e_layer = build_formatted_layer(err_nb, config)
+            let primary_layer = build_formatted_layer(primary_writer, config)
+                .with_filter(primary_filter);
+
+            // 2. 构建错误日志层 (Error-only Layer)
+            let error_writer = create_writer("error");
+            let error_layer = build_formatted_layer(error_writer, config)
                 .with_filter(EnvFilter::from("error"));
 
-            (Some(f_layer), Some(e_layer))
+            (Some(primary_layer), Some(error_layer))
         } else {
             (None, None)
         }
@@ -360,16 +447,16 @@ pub fn init_trace_logging(config: &LogConfig) -> Result<LogGuard> {
         (None, None)
     };
 
-    // --- D. 注册 ---
+    // --- D. 注册全局订阅者 ---
     let subscriber = Registry::default()
         .with(console_layer)
-        .with(file_layer)
+        .with(primary_file_layer)
         .with(error_file_layer);
 
-    tracing::subscriber::set_global_default(subscriber)
-        .context("Failed to set global subscriber")?;
+    subscriber.try_init()
+        .map_err(|e| anyhow::anyhow!("Failed to set global subscriber: {}", e))?;
 
-    Ok(LogGuard { _worker_guards: guards })
+    Ok(LogGuard { _worker_guards: worker_guards })
 }
 
 // --- 3. 单元测试模块 ---
