@@ -1,38 +1,32 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : level.rs
-//  @Author       : dyntrait Created On 2026/1/5 11:29
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 //! Represents a discrete price level in an order book.
 
 use std::cmp::Ordering;
 
+#[cfg(feature = "defi")]
+use alloy_primitives::U256;
 use indexmap::IndexMap;
-use nice_core::UnixNanos;
+use nice_core::{
+    UnixNanos,
+    correctness::{CorrectnessError, CorrectnessResult, CorrectnessResultExt},
+};
 use rust_decimal::Decimal;
 
+#[cfg(feature = "defi")]
+use crate::types::fixed::FIXED_PRECISION;
 use crate::{
     data::order::{BookOrder, OrderId},
-    enums::OrderSideSpecified,
+    enums::OrderSide,
     orderbook::{BookIntegrityError, BookPrice},
-    types::{fixed::FIXED_SCALAR, quantity::QuantityRaw},
+    types::{fixed::checked_mul_div_fixed, price::PriceRaw, quantity::QuantityRaw},
 };
 
 /// Represents a discrete price level in an order book.
 ///
 /// Orders are stored in an [`IndexMap`] which preserves FIFO (insertion) order.
 #[derive(Clone, Debug, Eq)]
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nice_trader.core.nice_pyo3.model")
-)]
+
 pub struct BookLevel {
     pub price: BookPrice,
     pub(crate) orders: IndexMap<OrderId, BookOrder>,
@@ -59,7 +53,8 @@ impl BookLevel {
         level
     }
 
-    pub fn side(&self) -> OrderSideSpecified {
+    #[must_use]
+    pub fn side(&self) -> OrderSide {
         self.price.side
     }
 
@@ -100,9 +95,30 @@ impl BookLevel {
     }
 
     /// Returns the total size of all orders at this price level as raw integer units.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the total raw size exceeds [`QuantityRaw::MAX`].
     #[must_use]
     pub fn size_raw(&self) -> QuantityRaw {
-        self.orders.values().map(|o| o.size.raw).sum()
+        self.size_raw_checked()
+            .expect_display("Overflow occurred when summing `BookLevel` raw size")
+    }
+
+    /// Returns the total size of all orders at this price level as raw integer units.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the total raw size exceeds [`QuantityRaw::MAX`].
+    pub(crate) fn size_raw_checked(&self) -> CorrectnessResult<QuantityRaw> {
+        self.orders
+            .values()
+            .try_fold(0, |total: QuantityRaw, order| {
+                total.checked_add(order.size.raw)
+            })
+            .ok_or_else(|| CorrectnessError::PredicateViolation {
+                message: "Overflow occurred when summing `BookLevel` raw size".to_string(),
+            })
     }
 
     /// Returns the total size of all orders at this price level as a decimal.
@@ -122,37 +138,30 @@ impl BookLevel {
 
     /// Returns the total exposure (price * size) of all orders at this price level as raw integer units.
     ///
+    /// Fixed-scale orders contribute `price.raw * size.raw / FIXED_SCALAR`.
+    /// Native DeFi scales are normalized to the same fixed-scale result.
+    /// Division truncates toward zero.
+    /// Non-positive prices contribute zero.
     /// Saturates at `QuantityRaw::MAX` if the total exposure would overflow.
     #[must_use]
     pub fn exposure_raw(&self) -> QuantityRaw {
         self.orders
             .values()
-            .map(|o| {
-                let exposure_f64 = o.price.as_f64() * o.size.as_f64();
-                debug_assert!(
-                    exposure_f64.is_finite(),
-                    "Exposure calculation resulted in non-finite value for order {}: price={}, size={}",
-                    o.order_id,
-                    o.price,
-                    o.size
-                );
-
-                let scaled = exposure_f64 * FIXED_SCALAR;
-                if scaled >= QuantityRaw::MAX as f64 {
-                    QuantityRaw::MAX
-                } else if scaled < 0.0 {
-                    0
-                } else {
-                    scaled as QuantityRaw
-                }
+            .map(|order| {
+                calculate_exposure_raw(
+                    order.price.raw,
+                    order.size.raw,
+                    order.price.precision,
+                    order.size.precision,
+                )
             })
-            .fold(0, |acc, val| acc.saturating_add(val))
+            .fold(0, QuantityRaw::saturating_add)
     }
 
     /// Adds multiple orders to this price level in FIFO order. Orders must match the level's price.
-    pub fn add_bulk(&mut self, orders: Vec<BookOrder>) {
+    pub fn add_bulk(&mut self, orders: &[BookOrder]) {
         for order in orders {
-            self.add(order);
+            self.add(*order);
         }
     }
 
@@ -172,8 +181,8 @@ impl BookLevel {
         self.orders.insert(order.order_id, order);
     }
 
-    /// Updates an existing order at this price level. Updated order must match the level's price.
-    /// Removes the order if size becomes zero.
+    /// Updates an order at this price level, inserting it if missing. Updated order
+    /// must match the level's price. Removes the order if the size becomes zero.
     pub fn update(&mut self, order: BookOrder) {
         debug_assert_eq!(order.price, self.price.value);
 
@@ -209,6 +218,46 @@ impl BookLevel {
     }
 }
 
+fn calculate_exposure_raw(
+    price_raw: PriceRaw,
+    size_raw: QuantityRaw,
+    price_precision: u8,
+    size_precision: u8,
+) -> QuantityRaw {
+    let Ok(price_raw) = QuantityRaw::try_from(price_raw) else {
+        return 0;
+    };
+
+    #[cfg(feature = "defi")]
+    if price_precision > FIXED_PRECISION || size_precision > FIXED_PRECISION {
+        return calculate_exposure_raw_native(price_raw, size_raw, price_precision, size_precision);
+    }
+
+    #[cfg(not(feature = "defi"))]
+    let _ = (price_precision, size_precision);
+
+    checked_mul_div_fixed(price_raw, size_raw).unwrap_or(QuantityRaw::MAX)
+}
+
+#[cfg(feature = "defi")]
+fn calculate_exposure_raw_native(
+    price_raw: QuantityRaw,
+    size_raw: QuantityRaw,
+    price_precision: u8,
+    size_precision: u8,
+) -> QuantityRaw {
+    let scale_precision = price_precision.max(FIXED_PRECISION)
+        + size_precision.max(FIXED_PRECISION)
+        - FIXED_PRECISION;
+    let scalar = 10_u128.pow(u32::from(scale_precision));
+    let exposure = U256::from(price_raw)
+        .checked_mul(U256::from(size_raw))
+        .expect("a positive i128 times a u128 fits U256")
+        / U256::from(scalar);
+
+    QuantityRaw::try_from(exposure).unwrap_or(QuantityRaw::MAX)
+}
+
 impl PartialEq for BookLevel {
     fn eq(&self, other: &Self) -> bool {
         self.price == other.price
@@ -232,18 +281,25 @@ mod tests {
     use rstest::rstest;
     use rust_decimal_macros::dec;
 
+    #[cfg(feature = "high-precision")]
+    use super::calculate_exposure_raw;
     use crate::{
         data::order::BookOrder,
-        enums::{OrderSide, OrderSideSpecified},
+        enums::OrderSide,
         orderbook::{BookLevel, BookPrice},
-        types::{Price, Quantity, fixed::FIXED_SCALAR, quantity::QuantityRaw},
+        types::{
+            Price, Quantity,
+            fixed::{FIXED_PRECISION, FIXED_SCALAR},
+            price::PriceRaw,
+            quantity::QuantityRaw,
+        },
     };
 
     #[rstest]
     fn test_empty_level() {
-        let level = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
+        let level = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSide::Buy));
         assert!(level.first().is_none());
-        assert_eq!(level.side(), OrderSideSpecified::Buy);
+        assert_eq!(level.side(), OrderSide::Buy);
     }
 
     #[rstest]
@@ -252,7 +308,7 @@ mod tests {
         let level = BookLevel::from_order(order);
 
         assert_eq!(level.price.value, Price::from("1.00"));
-        assert_eq!(level.price.side, OrderSideSpecified::Buy);
+        assert_eq!(level.price.side, OrderSide::Buy);
         assert_eq!(level.len(), 1);
         assert_eq!(level.first().unwrap(), &order);
         assert_eq!(level.size(), 10.0);
@@ -261,8 +317,7 @@ mod tests {
     #[rstest]
     #[should_panic(expected = "assertion `left == right` failed")]
     fn test_add_order_incorrect_price_level() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
+        let mut level = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSide::Buy));
         let incorrect_price_order =
             BookOrder::new(OrderSide::Buy, Price::from("2.00"), Quantity::from(10), 1);
         level.add(incorrect_price_order);
@@ -271,60 +326,40 @@ mod tests {
     #[rstest]
     #[should_panic(expected = "assertion `left == right` failed")]
     fn test_add_bulk_orders_incorrect_price() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
-        let orders = vec![
+        let mut level = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSide::Buy));
+        let orders = [
             BookOrder::new(OrderSide::Buy, Price::from("1.00"), Quantity::from(10), 1),
             BookOrder::new(OrderSide::Buy, Price::from("2.00"), Quantity::from(20), 2), // Incorrect price
         ];
-        level.add_bulk(orders);
+        level.add_bulk(&orders);
     }
 
     #[rstest]
     fn test_add_bulk_empty() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
-        level.add_bulk(vec![]);
+        let mut level = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSide::Buy));
+        level.add_bulk(&[]);
         assert!(level.is_empty());
     }
 
     #[rstest]
-    fn test_comparisons_bid_side() {
-        let level0 = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
-        let level1 = BookLevel::new(BookPrice::new(Price::from("1.01"), OrderSideSpecified::Buy));
-        assert_eq!(level0, level0);
-        assert!(level0 > level1);
-    }
+    #[case::bid(OrderSide::Buy, true)]
+    #[case::ask(OrderSide::Sell, false)]
+    fn test_comparisons(#[case] side: OrderSide, #[case] first_is_greater: bool) {
+        let level0 = BookLevel::new(BookPrice::new(Price::from("1.00"), side));
+        let same = BookLevel::new(BookPrice::new(Price::from("1.00"), side));
+        let level1 = BookLevel::new(BookPrice::new(Price::from("1.01"), side));
 
-    #[rstest]
-    fn test_comparisons_ask_side() {
-        let level0 = BookLevel::new(BookPrice::new(
-            Price::from("1.00"),
-            OrderSideSpecified::Sell,
-        ));
-        let level1 = BookLevel::new(BookPrice::new(
-            Price::from("1.01"),
-            OrderSideSpecified::Sell,
-        ));
-        assert_eq!(level0, level0);
-        assert!(level0 < level1);
+        assert_eq!(level0, same);
+        assert_eq!(level0 > level1, first_is_greater);
+        assert_eq!(level0 < level1, !first_is_greater);
     }
 
     #[rstest]
     fn test_book_level_sorting() {
         let mut levels = [
-            BookLevel::new(BookPrice::new(
-                Price::from("1.00"),
-                OrderSideSpecified::Sell,
-            )),
-            BookLevel::new(BookPrice::new(
-                Price::from("1.02"),
-                OrderSideSpecified::Sell,
-            )),
-            BookLevel::new(BookPrice::new(
-                Price::from("1.01"),
-                OrderSideSpecified::Sell,
-            )),
+            BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSide::Sell)),
+            BookLevel::new(BookPrice::new(Price::from("1.02"), OrderSide::Sell)),
+            BookLevel::new(BookPrice::new(Price::from("1.01"), OrderSide::Sell)),
         ];
         levels.sort();
         assert_eq!(levels[0].price.value, Price::from("1.00"));
@@ -334,8 +369,7 @@ mod tests {
 
     #[rstest]
     fn test_add_single_order() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
+        let mut level = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSide::Buy));
         let order = BookOrder::new(OrderSide::Buy, Price::from("1.00"), Quantity::from(10), 0);
 
         level.add(order);
@@ -347,8 +381,7 @@ mod tests {
 
     #[rstest]
     fn test_add_multiple_orders() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("2.00"), OrderSideSpecified::Buy));
+        let mut level = BookLevel::new(BookPrice::new(Price::from("2.00"), OrderSide::Buy));
         let order1 = BookOrder::new(OrderSide::Buy, Price::from("2.00"), Quantity::from(10), 0);
         let order2 = BookOrder::new(OrderSide::Buy, Price::from("2.00"), Quantity::from(20), 1);
 
@@ -362,8 +395,7 @@ mod tests {
 
     #[rstest]
     fn test_get_orders() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
+        let mut level = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSide::Buy));
         let order1 = BookOrder::new(OrderSide::Buy, Price::from("1.00"), Quantity::from(10), 1);
         let order2 = BookOrder::new(OrderSide::Buy, Price::from("1.00"), Quantity::from(20), 2);
 
@@ -378,8 +410,7 @@ mod tests {
 
     #[rstest]
     fn test_iter_returns_fifo() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
+        let mut level = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSide::Buy));
         let order1 = BookOrder::new(OrderSide::Buy, Price::from("1.00"), Quantity::from(10), 1);
         let order2 = BookOrder::new(OrderSide::Buy, Price::from("1.00"), Quantity::from(20), 2);
         level.add(order1);
@@ -391,8 +422,7 @@ mod tests {
 
     #[rstest]
     fn test_update_order() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
+        let mut level = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSide::Buy));
         let order1 = BookOrder::new(OrderSide::Buy, Price::from("1.00"), Quantity::from(10), 0);
         let order2 = BookOrder::new(OrderSide::Buy, Price::from("1.00"), Quantity::from(20), 0);
 
@@ -405,8 +435,7 @@ mod tests {
 
     #[rstest]
     fn test_update_inserts_if_missing() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
+        let mut level = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSide::Buy));
         let order = BookOrder::new(OrderSide::Buy, Price::from("1.00"), Quantity::from(10), 1);
         level.update(order);
         assert_eq!(level.len(), 1);
@@ -415,8 +444,7 @@ mod tests {
 
     #[rstest]
     fn test_update_zero_size_nonexistent() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
+        let mut level = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSide::Buy));
         let order = BookOrder::new(OrderSide::Buy, Price::from("1.00"), Quantity::zero(0), 1);
         level.update(order);
         assert_eq!(level.len(), 0);
@@ -424,8 +452,7 @@ mod tests {
 
     #[rstest]
     fn test_fifo_order_after_updates() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
+        let mut level = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSide::Buy));
 
         let order1 = BookOrder::new(OrderSide::Buy, Price::from("1.00"), Quantity::from(10), 1);
         let order2 = BookOrder::new(OrderSide::Buy, Price::from("1.00"), Quantity::from(20), 2);
@@ -446,8 +473,7 @@ mod tests {
 
     #[rstest]
     fn test_insertion_order_after_mixed_operations() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
+        let mut level = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSide::Buy));
         let order1 = BookOrder::new(OrderSide::Buy, Price::from("1.00"), Quantity::from(10), 1);
         let order2 = BookOrder::new(OrderSide::Buy, Price::from("1.00"), Quantity::from(20), 2);
         let order3 = BookOrder::new(OrderSide::Buy, Price::from("1.00"), Quantity::from(30), 3);
@@ -471,8 +497,7 @@ mod tests {
     #[rstest]
     #[should_panic(expected = "assertion `left == right` failed")]
     fn test_update_order_incorrect_price() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
+        let mut level = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSide::Buy));
 
         // Add initial order at correct price level
         let initial_order =
@@ -487,8 +512,7 @@ mod tests {
 
     #[rstest]
     fn test_update_order_with_zero_size() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
+        let mut level = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSide::Buy));
         let order1 = BookOrder::new(OrderSide::Buy, Price::from("1.00"), Quantity::from(10), 0);
         let order2 = BookOrder::new(OrderSide::Buy, Price::from("1.00"), Quantity::zero(0), 0);
 
@@ -501,8 +525,7 @@ mod tests {
 
     #[rstest]
     fn test_delete_nonexistent_order() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
+        let mut level = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSide::Buy));
         let order = BookOrder::new(OrderSide::Buy, Price::from("1.00"), Quantity::from(10), 1);
         level.delete(&order);
         assert_eq!(level.len(), 0);
@@ -510,8 +533,7 @@ mod tests {
 
     #[rstest]
     fn test_delete_order() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
+        let mut level = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSide::Buy));
         let order1_id = 0;
         let order1 = BookOrder::new(
             OrderSide::Buy,
@@ -538,8 +560,7 @@ mod tests {
 
     #[rstest]
     fn test_remove_order_by_id() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
+        let mut level = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSide::Buy));
         let order1_id = 0;
         let order1 = BookOrder::new(
             OrderSide::Buy,
@@ -566,8 +587,7 @@ mod tests {
 
     #[rstest]
     fn test_add_bulk_orders() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("2.00"), OrderSideSpecified::Buy));
+        let mut level = BookLevel::new(BookPrice::new(Price::from("2.00"), OrderSide::Buy));
         let order1_id = 0;
         let order1 = BookOrder::new(
             OrderSide::Buy,
@@ -583,8 +603,8 @@ mod tests {
             order2_id,
         );
 
-        let orders = vec![order1, order2];
-        level.add_bulk(orders);
+        let orders = [order1, order2];
+        level.add_bulk(&orders);
         assert_eq!(level.len(), 2);
         assert_eq!(level.size(), 30.0);
         assert_eq!(level.exposure(), 60.0);
@@ -592,8 +612,7 @@ mod tests {
 
     #[rstest]
     fn test_maximum_order_id() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
+        let mut level = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSide::Buy));
 
         let order = BookOrder::new(
             OrderSide::Buy,
@@ -612,27 +631,13 @@ mod tests {
         expected = "Integrity error: order not found: order_id=1, sequence=2, ts_event=3"
     )]
     fn test_remove_nonexistent_order() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
+        let mut level = BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSide::Buy));
         level.remove_by_id(1, 2, 3.into());
     }
 
     #[rstest]
-    fn test_size() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("1.00"), OrderSideSpecified::Buy));
-        let order1 = BookOrder::new(OrderSide::Buy, Price::from("1.00"), Quantity::from(10), 0);
-        let order2 = BookOrder::new(OrderSide::Buy, Price::from("1.00"), Quantity::from(15), 1);
-
-        level.add(order1);
-        level.add(order2);
-        assert_eq!(level.size(), 25.0);
-    }
-
-    #[rstest]
     fn test_size_raw() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("2.00"), OrderSideSpecified::Buy));
+        let mut level = BookLevel::new(BookPrice::new(Price::from("2.00"), OrderSide::Buy));
         let order1 = BookOrder::new(OrderSide::Buy, Price::from("2.00"), Quantity::from(10), 0);
         let order2 = BookOrder::new(OrderSide::Buy, Price::from("2.00"), Quantity::from(20), 1);
 
@@ -646,8 +651,7 @@ mod tests {
 
     #[rstest]
     fn test_size_decimal() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("2.00"), OrderSideSpecified::Buy));
+        let mut level = BookLevel::new(BookPrice::new(Price::from("2.00"), OrderSide::Buy));
         let order1 = BookOrder::new(OrderSide::Buy, Price::from("2.00"), Quantity::from(10), 0);
         let order2 = BookOrder::new(OrderSide::Buy, Price::from("2.00"), Quantity::from(20), 1);
 
@@ -657,47 +661,89 @@ mod tests {
     }
 
     #[rstest]
-    fn test_exposure() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("2.00"), OrderSideSpecified::Buy));
-        let order1 = BookOrder::new(OrderSide::Buy, Price::from("2.00"), Quantity::from(10), 0);
-        let order2 = BookOrder::new(OrderSide::Buy, Price::from("2.00"), Quantity::from(20), 1);
+    #[case::negative("-2", "10", 0)]
+    #[case::zero("0", "1", 0)]
+    #[case::small("2", "10", 20)]
+    fn test_exposure_raw_exact_whole(
+        #[case] price: &str,
+        #[case] size: &str,
+        #[case] expected_units: QuantityRaw,
+    ) {
+        let price = Price::from(price);
+        let mut level = BookLevel::new(BookPrice::new(price, OrderSide::Buy));
+        level.add(BookOrder::new(
+            OrderSide::Buy,
+            price,
+            Quantity::from(size),
+            0,
+        ));
 
-        level.add(order1);
-        level.add(order2);
-        assert_eq!(level.exposure(), 60.0);
-    }
-
-    #[rstest]
-    fn test_exposure_raw() {
-        let mut level =
-            BookLevel::new(BookPrice::new(Price::from("2.00"), OrderSideSpecified::Buy));
-        let order1 = BookOrder::new(OrderSide::Buy, Price::from("2.00"), Quantity::from(10), 0);
-        let order2 = BookOrder::new(OrderSide::Buy, Price::from("2.00"), Quantity::from(20), 1);
-
-        level.add(order1);
-        level.add(order2);
         assert_eq!(
             level.exposure_raw(),
-            (60.0 * FIXED_SCALAR).round() as QuantityRaw
+            expected_units * FIXED_SCALAR as QuantityRaw
         );
     }
 
     #[rstest]
-    fn test_exposure_raw_saturates_on_overflow() {
-        // Test that exposure_raw saturates at QuantityRaw::MAX instead of wrapping
-        // Use values whose product * FIXED_SCALAR overflows QuantityRaw
+    fn test_exposure_raw_truncates_sub_raw_unit() {
+        let scalar = FIXED_SCALAR as QuantityRaw;
+        let price = Price::from_raw((scalar + 1) as PriceRaw, FIXED_PRECISION);
+        let size = Quantity::from_raw(scalar + 1, FIXED_PRECISION);
+        let mut level = BookLevel::new(BookPrice::new(price, OrderSide::Buy));
+        level.add(BookOrder::new(OrderSide::Buy, price, size, 0));
+
+        assert_eq!(level.exposure_raw(), scalar + 2);
+    }
+
+    #[rstest]
+    fn test_exposure_raw_accumulates_exactly() {
+        let mut level = BookLevel::new(BookPrice::new(Price::from("2.00"), OrderSide::Buy));
+        let order1 = BookOrder::new(OrderSide::Buy, Price::from("2.00"), Quantity::from(10), 0);
+        let order2 = BookOrder::new(OrderSide::Buy, Price::from("2.00"), Quantity::from(20), 1);
+
+        level.add(order1);
+        level.add(order2);
+        assert_eq!(level.exposure_raw(), 60 * FIXED_SCALAR as QuantityRaw);
+    }
+
+    #[cfg(not(feature = "high-precision"))]
+    #[rstest]
+    fn test_exposure_raw_preserves_non_saturating_raw_units() {
+        let price = Price::from("9007199253.999999999");
+        let size = Quantity::from("2.000000001");
+        let mut level = BookLevel::new(BookPrice::new(price, OrderSide::Buy));
+        level.add(BookOrder::new(OrderSide::Buy, price, size, 0));
+
+        assert_eq!(level.exposure_raw(), 18_014_398_517_007_199_251);
+    }
+
+    #[cfg(feature = "high-precision")]
+    #[rstest]
+    fn test_exposure_raw_avoids_phantom_overflow() {
+        let scalar = FIXED_SCALAR as QuantityRaw;
+        let price_raw = 100_000 * scalar;
+        let size_raw = 100 * scalar;
+
+        assert_eq!(price_raw.checked_mul(size_raw), None);
+        assert_eq!(
+            calculate_exposure_raw(
+                price_raw as PriceRaw,
+                size_raw,
+                FIXED_PRECISION,
+                FIXED_PRECISION,
+            ),
+            10_000_000 * scalar
+        );
+    }
+
+    #[rstest]
+    fn test_exposure_raw_saturates_single_order() {
         #[cfg(feature = "high-precision")]
         let (price_str, qty_str) = ("1000000000000.00", "1000000000000.00");
         #[cfg(not(feature = "high-precision"))]
         let (price_str, qty_str) = ("100000000.00", "1000000000.00");
 
-        let mut level = BookLevel::new(BookPrice::new(
-            Price::from(price_str),
-            OrderSideSpecified::Buy,
-        ));
-
-        // Create an order with large price and quantity that would overflow QuantityRaw
+        let mut level = BookLevel::new(BookPrice::new(Price::from(price_str), OrderSide::Buy));
         let order = BookOrder::new(
             OrderSide::Buy,
             Price::from(price_str),
@@ -707,37 +753,71 @@ mod tests {
 
         level.add(order);
 
-        // Should saturate at max value instead of wrapping around
-        let result = level.exposure_raw();
-        assert_eq!(result, QuantityRaw::MAX);
+        assert_eq!(level.exposure_raw(), QuantityRaw::MAX);
     }
 
     #[rstest]
-    fn test_exposure_raw_sum_saturates_on_overflow() {
-        // Test that summing exposures saturates instead of wrapping
+    fn test_exposure_raw_accumulation_saturates() {
         #[cfg(feature = "high-precision")]
-        let (price_str, qty_str, count) = ("10000000000000.00", "10000000000000.00", 100);
+        let (price_str, qty_str, expected_single) = (
+            "100000000000.0",
+            "200000000000.0",
+            200_000_000_000_000_000_000_000_000_000_000_000_000,
+        );
         #[cfg(not(feature = "high-precision"))]
-        let (price_str, qty_str, count) = ("1000000000.00", "1000000000.00", 100);
+        let (price_str, qty_str, expected_single) =
+            ("2.0", "5000000000.0", 10_000_000_000_000_000_000);
 
-        let mut level = BookLevel::new(BookPrice::new(
+        let mut level = BookLevel::new(BookPrice::new(Price::from(price_str), OrderSide::Buy));
+        level.add(BookOrder::new(
+            OrderSide::Buy,
             Price::from(price_str),
-            OrderSideSpecified::Buy,
+            Quantity::from(qty_str),
+            0,
         ));
+        assert_eq!(level.exposure_raw(), expected_single);
 
-        // Add multiple large orders that together would overflow when summed
-        for i in 0..count {
-            let order = BookOrder::new(
-                OrderSide::Buy,
-                Price::from(price_str),
-                Quantity::from(qty_str),
-                i,
-            );
-            level.add(order);
-        }
+        level.add(BookOrder::new(
+            OrderSide::Buy,
+            Price::from(price_str),
+            Quantity::from(qty_str),
+            1,
+        ));
+        assert_eq!(level.exposure_raw(), QuantityRaw::MAX);
+    }
 
-        // Should saturate at max value instead of wrapping around
-        let result = level.exposure_raw();
-        assert_eq!(result, QuantityRaw::MAX);
+    #[cfg(feature = "defi")]
+    #[rstest]
+    fn test_exposure_raw_preserves_native_defi_scales() {
+        let price_precision = FIXED_PRECISION + 1;
+        let size_precision = FIXED_PRECISION + 2;
+        let price = Price::from_raw(
+            125 * 10_i128.pow(u32::from(price_precision - 2)),
+            price_precision,
+        );
+        let size = Quantity::from_raw(
+            24 * 10_u128.pow(u32::from(size_precision - 1)),
+            size_precision,
+        );
+        let mut level = BookLevel::new(BookPrice::new(price, OrderSide::Buy));
+        level.add(BookOrder::new(OrderSide::Buy, price, size, 0));
+
+        assert_eq!(level.exposure_raw(), 3 * FIXED_SCALAR as QuantityRaw);
+    }
+
+    #[cfg(feature = "defi")]
+    #[rstest]
+    #[case::native_price(1_250_000_000_000_000_000, 24_000_000_000_000_000, 18, 8)]
+    #[case::native_size(12_500_000_000_000_000, 2_400_000_000_000_000_000, 8, 18)]
+    fn test_exposure_raw_preserves_mixed_defi_scales(
+        #[case] price_raw: PriceRaw,
+        #[case] size_raw: QuantityRaw,
+        #[case] price_precision: u8,
+        #[case] size_precision: u8,
+    ) {
+        assert_eq!(
+            calculate_exposure_raw(price_raw, size_raw, price_precision, size_precision),
+            3 * FIXED_SCALAR as QuantityRaw
+        );
     }
 }

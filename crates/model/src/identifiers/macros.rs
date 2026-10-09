@@ -1,18 +1,11 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2025  Dyntrait  All rights reserved.
-//  All Rights Reserved
-//
-//  @File         : macros.rs
-//  @Author       : dyntrait
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 //! Provides macros for generating identifier functionality.
 
+// Deserializes via `Cow<'de, str>` so the impl handles both borrowed
+// and owned strings. Owned variants are produced by deserializers that
+// must allocate (e.g. `serde_json` decoding `\uXXXX` escapes, content
+// buffering for `#[serde(tag = "...")]` enums, or `serde_json::Value`).
 macro_rules! impl_serialization_for_identifier {
     ($ty:ty) => {
         impl Serialize for $ty {
@@ -29,9 +22,8 @@ macro_rules! impl_serialization_for_identifier {
             where
                 D: Deserializer<'de>,
             {
-                let value_str: &str = Deserialize::deserialize(deserializer)?;
-                let value: $ty = value_str.into();
-                Ok(value)
+                let value_str: std::borrow::Cow<'de, str> = Deserialize::deserialize(deserializer)?;
+                Self::new_checked(value_str.as_ref()).map_err(serde::de::Error::custom)
             }
         }
     };
@@ -48,6 +40,19 @@ macro_rules! impl_from_str_for_identifier {
         impl From<String> for $ty {
             fn from(value: String) -> Self {
                 Self::new(value)
+            }
+        }
+    };
+}
+
+// Erases a kind-typed identifier to its `ComponentId`. The source already
+// holds a validated interned value, so the conversion reuses it rather than
+// re-checking and re-interning through the string constructors.
+macro_rules! impl_from_identifier_for_component_id {
+    ($ty:ty) => {
+        impl From<$ty> for ComponentId {
+            fn from(value: $ty) -> Self {
+                Self(value.inner())
             }
         }
     };

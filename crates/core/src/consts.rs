@@ -1,26 +1,37 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2025 dyntrait. All rights reserved.
-//
-//  @File         : consts.rs
-//  @Author       : dyntrait
-//  @Description  :
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
+
 //! Core constants.
 
-use std::env;
+/// The niceTrader string constant.
+pub static NICE_TRADER: &str = "niceTrader";
 
-/// The NautilusTrader string constant.
-pub static NICE_TRADER: &str = "NiceTrader";
+/// The `nice-core` crate version string embedded at compile time.
+pub static NICE_VERSION_CORE: &str = env!("CARGO_PKG_VERSION");
 
-/// The NautilusTrader version string read from the top-level `pyproject.toml` at compile time.
-pub static NICE_VERSION: &str = env!("NICE_VERSION");
+/// The niceTrader version string selected for the compiled application.
+pub static NICE_VERSION: &str = NICE_VERSION_CORE;
 
-/// The NautilusTrader common User-Agent string including the current version at compile time.
-pub static NICE_USER_AGENT: &str = env!("NICE_USER_AGENT");
+/// The niceTrader common User-Agent string including the current version at compile time.
+pub static NICE_USER_AGENT: &str = concat!("niceTrader/", env!("CARGO_PKG_VERSION"));
 
 /// Prefix for log messages outside the main logging subsystem.
-pub static NICE_PREFIX: &str = "[NICE]";
+pub static NICE_PREFIX: &str = "[nice]";
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    fn test_nice_versions_rust() {
+        assert_eq!(NICE_VERSION_CORE, env!("CARGO_PKG_VERSION"));
+        assert_eq!(NICE_VERSION, env!("CARGO_PKG_VERSION"));
+        assert_eq!(
+            NICE_USER_AGENT,
+            concat!("niceTrader/", env!("CARGO_PKG_VERSION")),
+        );
+    }
+
+
+}

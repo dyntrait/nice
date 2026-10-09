@@ -1,16 +1,5 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2025 dyntrait. All rights reserved.
-//
-//  @File         : testing.rs
-//  @Author       : dyntrait
-//  @Description  :
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
 
-//! Common test related helper functions.
+//! Common test support.
 
 #[cfg(feature = "live")]
 use std::future::Future;
@@ -32,8 +21,10 @@ use crate::logging::{
 ///
 /// Returns an error if initializing the logger fails.
 pub fn init_logger_for_testing(stdout_level: Option<log::LevelFilter>) -> anyhow::Result<LogGuard> {
-    let mut config = LoggerConfig::default();
-    config.stdout_level = stdout_level.unwrap_or(log::LevelFilter::Trace);
+    let config = LoggerConfig {
+        stdout_level: stdout_level.unwrap_or(log::LevelFilter::Trace),
+        ..Default::default()
+    };
     init_logging(
         TraderId::default(),
         UUID4::new(),
@@ -51,20 +42,23 @@ pub fn init_logger_for_testing(stdout_level: Option<log::LevelFilter>) -> anyhow
 /// # Examples
 ///
 /// ```
-/// use std::time::Duration;
-/// use std::thread;
-/// use nautilus_common::testing::wait_until;
+/// use std::{thread, time::Duration};
+///
+/// use nice_common::testing::wait_until;
 ///
 /// let start_time = std::time::Instant::now();
 /// let timeout = Duration::from_secs(5);
 ///
-/// wait_until(|| {
-///     if start_time.elapsed().as_secs() > 2 {
-///         true
-///     } else {
-///         false
-///     }
-/// }, timeout);
+/// wait_until(
+///     || {
+///         if start_time.elapsed().as_secs() > 2 {
+///             true
+///         } else {
+///             false
+///         }
+///     },
+///     timeout,
+/// );
 /// ```
 ///
 /// In the above example, the `wait_until` function will block for at least 2 seconds, as that's how long
@@ -73,7 +67,7 @@ pub fn wait_until<F>(mut condition: F, timeout: Duration)
 where
     F: FnMut() -> bool,
 {
-    let start_time = Instant::now();
+    let start_time = Instant::now(); // dst-ok: test timer; uses real time by design
 
     loop {
         if condition() {
@@ -82,7 +76,9 @@ where
 
         assert!(
             start_time.elapsed() <= timeout,
-            "Timeout waiting for condition"
+            "Timeout waiting for condition after {:.1}s (limit {:.1}s)",
+            start_time.elapsed().as_secs_f64(),
+            timeout.as_secs_f64(),
         );
 
         thread::sleep(Duration::from_millis(100));
@@ -98,7 +94,7 @@ where
     F: FnMut() -> Fut,
     Fut: Future<Output = bool>,
 {
-    let start_time = Instant::now();
+    let start_time = Instant::now(); // dst-ok: test timer; uses real time by design
 
     loop {
         if condition().await {
@@ -107,7 +103,9 @@ where
 
         assert!(
             start_time.elapsed() <= timeout,
-            "Timeout waiting for condition"
+            "Timeout waiting for condition after {:.1}s (limit {:.1}s)",
+            start_time.elapsed().as_secs_f64(),
+            timeout.as_secs_f64(),
         );
 
         tokio::time::sleep(Duration::from_millis(100)).await;

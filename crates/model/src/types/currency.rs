@@ -1,15 +1,4 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2026  dyntrait  All rights reserved.
-//  All Rights Reserved
-//
-//  @File         : currency.rs
-//  @Author       : dyntrait
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 //! Represents a medium of exchange in a specified denomination with a fixed decimal precision.
 //!
@@ -21,23 +10,41 @@ use std::{
     str::FromStr,
 };
 
-use nice_core::correctness::{FAILED, check_nonempty_string, check_valid_string_utf8};
+use nice_core::correctness::{
+    CorrectnessResult, CorrectnessResultExt, FAILED, check_nonempty_string, check_valid_string_utf8,
+};
 use serde::{Deserialize, Serialize, Serializer};
+use thiserror::Error;
 use ustr::Ustr;
 
 #[allow(unused_imports)]
 use super::fixed::{FIXED_PRECISION, check_fixed_precision};
 use crate::{currencies::CURRENCY_MAP, enums::CurrencyType};
 
+/// Error returned when a currency cannot be resolved from the model currency map.
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
+pub enum CurrencyLookupError {
+    /// A legacy currency-map lock failure.
+    ///
+    /// Current lookup methods use infallible locks and do not return this variant.
+    #[error("Failed to acquire lock on `CURRENCY_MAP`: {reason}")]
+    LockFailure {
+        /// The legacy lock failure reason.
+        reason: String,
+    },
+    /// The requested currency code is not present in the currency map.
+    #[error("Unknown currency: {code}")]
+    UnknownCode {
+        /// The currency code that was requested.
+        code: String,
+    },
+}
+
 /// Represents a medium of exchange in a specified denomination with a fixed decimal precision.
 ///
 /// Handles up to [`FIXED_PRECISION`] decimals of precision.
 #[repr(C)]
 #[derive(Clone, Copy, Eq)]
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nice_trader.core.nice_pyo3.model", frozen, eq, hash)
-)]
 pub struct Currency {
     /// The currency code as an alpha-3 string (e.g., "USD", "EUR").
     pub code: Ustr,
@@ -59,7 +66,7 @@ impl Currency {
     /// Returns an error if:
     /// - `code` is not a valid string.
     /// - `name` is the empty string.
-    /// - `precision` is invalid outside the valid representable range [0, FIXED_PRECISION].
+    /// - `precision` is invalid outside the valid representable range [0, `FIXED_PRECISION`].
     ///
     /// # Notes
     ///
@@ -70,7 +77,7 @@ impl Currency {
         iso4217: u16,
         name: T,
         currency_type: CurrencyType,
-    ) -> anyhow::Result<Self> {
+    ) -> CorrectnessResult<Self> {
         let code = code.as_ref();
         let name = name.as_ref();
         check_valid_string_utf8(code, "code")?;
@@ -97,7 +104,7 @@ impl Currency {
         name: T,
         currency_type: CurrencyType,
     ) -> Self {
-        Self::new_checked(code, precision, iso4217, name, currency_type).expect(FAILED)
+        Self::new_checked(code, precision, iso4217, name, currency_type).expect_display(FAILED)
     }
 
     /// Register the given `currency` in the internal currency map.
@@ -107,11 +114,9 @@ impl Currency {
     ///
     /// # Errors
     ///
-    /// Returns an error if there is a failure acquiring the lock on the currency map.
-    pub fn register(currency: Self, overwrite: bool) -> anyhow::Result<()> {
-        let mut map = CURRENCY_MAP
-            .lock()
-            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    /// This function does not currently return an error.
+    pub fn register(currency: Self, overwrite: bool) -> CorrectnessResult<()> {
+        let mut map = CURRENCY_MAP.lock();
 
         if !overwrite && map.contains_key(currency.code.as_str()) {
             // If overwrite is false and the currency already exists, simply return
@@ -125,7 +130,7 @@ impl Currency {
 
     /// Attempts to parse a [`Currency`] from a string, returning `None` if not found.
     pub fn try_from_str(s: &str) -> Option<Self> {
-        let map_guard = CURRENCY_MAP.lock().ok()?;
+        let map_guard = CURRENCY_MAP.lock();
         map_guard.get(s).copied()
     }
 
@@ -133,10 +138,8 @@ impl Currency {
     ///
     /// # Errors
     ///
-    /// Returns an error if:
-    /// - A currency with the given `code` does not exist.
-    /// - There is a failure acquiring the lock on the currency map.
-    pub fn is_fiat(code: &str) -> anyhow::Result<bool> {
+    /// Returns an error if a currency with the given `code` does not exist.
+    pub fn is_fiat(code: &str) -> Result<bool, CurrencyLookupError> {
         let currency = Self::from_str(code)?;
         Ok(currency.currency_type == CurrencyType::Fiat)
     }
@@ -145,10 +148,8 @@ impl Currency {
     ///
     /// # Errors
     ///
-    /// Returns an error if:
-    /// - If a currency with the given `code` does not exist.
-    /// - If there is a failure acquiring the lock on the currency map.
-    pub fn is_crypto(code: &str) -> anyhow::Result<bool> {
+    /// Returns an error if a currency with the given `code` does not exist.
+    pub fn is_crypto(code: &str) -> Result<bool, CurrencyLookupError> {
         let currency = Self::from_str(code)?;
         Ok(currency.currency_type == CurrencyType::Crypto)
     }
@@ -158,10 +159,8 @@ impl Currency {
     ///
     /// # Errors
     ///
-    /// Returns an error if:
-    /// - A currency with the given `code` does not exist.
-    /// - There is a failure acquiring the lock on the currency map.
-    pub fn is_commodity_backed(code: &str) -> anyhow::Result<bool> {
+    /// Returns an error if a currency with the given `code` does not exist.
+    pub fn is_commodity_backed(code: &str) -> Result<bool, CurrencyLookupError> {
         let currency = Self::from_str(code)?;
         Ok(currency.currency_type == CurrencyType::CommodityBacked)
     }
@@ -173,7 +172,7 @@ impl Currency {
     /// internal map, a new cryptocurrency is created with:
     /// - 8 decimal precision
     /// - ISO 4217 code of 0
-    /// - CurrencyType::Crypto
+    /// - `CurrencyType::Crypto`
     ///
     /// The newly created currency is automatically registered in the internal map.
     #[must_use]
@@ -256,22 +255,25 @@ impl Display for Currency {
 }
 
 impl FromStr for Currency {
-    type Err = anyhow::Error;
+    type Err = CurrencyLookupError;
 
-    fn from_str(s: &str) -> anyhow::Result<Self> {
-        let map_guard = CURRENCY_MAP
-            .lock()
-            .map_err(|e| anyhow::anyhow!("Failed to acquire lock on `CURRENCY_MAP`: {e}"))?;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let map_guard = CURRENCY_MAP.lock();
         map_guard
             .get(s)
             .copied()
-            .ok_or_else(|| anyhow::anyhow!("Unknown currency: {s}"))
+            .ok_or_else(|| CurrencyLookupError::UnknownCode {
+                code: s.to_string(),
+            })
     }
 }
 
 impl<T: AsRef<str>> From<T> for Currency {
     fn from(value: T) -> Self {
-        Self::from_str(value.as_ref()).expect(FAILED)
+        match Self::from_str(value.as_ref()) {
+            Ok(currency) => currency,
+            Err(e) => panic!("{FAILED}: {e}"),
+        }
     }
 }
 
@@ -289,25 +291,28 @@ impl<'de> Deserialize<'de> for Currency {
     where
         D: serde::Deserializer<'de>,
     {
-        let currency_str: String = Deserialize::deserialize(deserializer)?;
-        Self::from_str(&currency_str).map_err(serde::de::Error::custom)
+        let currency_str: std::borrow::Cow<'de, str> = Deserialize::deserialize(deserializer)?;
+        Self::from_str(currency_str.as_ref()).map_err(serde::de::Error::custom)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use rstest::rstest;
 
-    use crate::{enums::CurrencyType, types::Currency};
+    use crate::{
+        enums::CurrencyType,
+        types::{Currency, CurrencyLookupError},
+    };
 
     #[rstest]
     fn test_debug() {
         let currency = Currency::AUD();
         assert_eq!(
             format!("{currency:?}"),
-            format!(
-                "Currency(code='AUD', precision=2, iso4217=36, name='Australian dollar', currency_type=FIAT)"
-            )
+            "Currency(code='AUD', precision=2, iso4217=36, name='Australian dollar', currency_type=FIAT)".to_string()
         );
     }
 
@@ -354,7 +359,7 @@ mod tests {
         Currency::register(currency2, false).unwrap();
 
         let found = Currency::try_from_str("TEST1").unwrap();
-        assert_eq!(found.name.as_str(), "Test Currency 1");
+        assert_eq!(found.name, "Test Currency 1");
     }
 
     #[rstest]
@@ -372,17 +377,17 @@ mod tests {
         Currency::register(currency2, true).unwrap();
 
         let found = Currency::try_from_str("TEST2").unwrap();
-        assert_eq!(found.name.as_str(), "Test Currency 2 Overwritten");
+        assert_eq!(found.name, "Test Currency 2 Overwritten");
     }
 
     #[rstest]
     fn test_new_for_fiat() {
         let currency = Currency::new("AUD", 2, 36, "Australian dollar", CurrencyType::Fiat);
         assert_eq!(currency, currency);
-        assert_eq!(currency.code.as_str(), "AUD");
+        assert_eq!(currency.code, "AUD");
         assert_eq!(currency.precision, 2);
         assert_eq!(currency.iso4217, 36);
-        assert_eq!(currency.name.as_str(), "Australian dollar");
+        assert_eq!(currency.name, "Australian dollar");
         assert_eq!(currency.currency_type, CurrencyType::Fiat);
     }
 
@@ -390,10 +395,10 @@ mod tests {
     fn test_new_for_crypto() {
         let currency = Currency::new("ETH", 8, 0, "Ether", CurrencyType::Crypto);
         assert_eq!(currency, currency);
-        assert_eq!(currency.code.as_str(), "ETH");
+        assert_eq!(currency.code, "ETH");
         assert_eq!(currency.precision, 8);
         assert_eq!(currency.iso4217, 0);
-        assert_eq!(currency.name.as_str(), "Ether");
+        assert_eq!(currency.name, "Ether");
         assert_eq!(currency.currency_type, CurrencyType::Crypto);
     }
 
@@ -469,8 +474,69 @@ mod tests {
 
     #[rstest]
     fn test_is_fiat_unknown_currency() {
-        let result = Currency::is_fiat("NON_EXISTENT");
-        assert!(result.is_err(), "Should fail for unknown currency code");
+        let err = Currency::is_fiat("NON_EXISTENT").unwrap_err();
+        assert_eq!(
+            err,
+            CurrencyLookupError::UnknownCode {
+                code: "NON_EXISTENT".to_string()
+            }
+        );
+        assert_eq!(err.to_string(), "Unknown currency: NON_EXISTENT");
+    }
+
+    #[rstest]
+    #[case(Currency::is_fiat)]
+    #[case(Currency::is_crypto)]
+    #[case(Currency::is_commodity_backed)]
+    fn test_currency_classification_unknown_code_returns_typed_error(
+        #[case] classify: fn(&str) -> Result<bool, CurrencyLookupError>,
+    ) {
+        let err = classify("UNKNOWN_CLASSIFICATION").unwrap_err();
+
+        assert_eq!(
+            err,
+            CurrencyLookupError::UnknownCode {
+                code: "UNKNOWN_CLASSIFICATION".to_string()
+            }
+        );
+        assert_eq!(err.to_string(), "Unknown currency: UNKNOWN_CLASSIFICATION");
+    }
+
+    #[rstest]
+    fn test_from_str_unknown_code_returns_typed_error() {
+        let err = Currency::from_str("UNKNOWN_FROM_STR").unwrap_err();
+
+        assert_eq!(
+            err,
+            CurrencyLookupError::UnknownCode {
+                code: "UNKNOWN_FROM_STR".to_string()
+            }
+        );
+        assert_eq!(err.to_string(), "Unknown currency: UNKNOWN_FROM_STR");
+    }
+
+    #[rstest]
+    fn test_currency_lookup_error_legacy_lock_failure_display() {
+        let err = CurrencyLookupError::LockFailure {
+            reason: "legacy lock failure".to_string(),
+        };
+
+        assert_eq!(
+            err,
+            CurrencyLookupError::LockFailure {
+                reason: "legacy lock failure".to_string()
+            }
+        );
+        assert_eq!(
+            err.to_string(),
+            "Failed to acquire lock on `CURRENCY_MAP`: legacy lock failure"
+        );
+    }
+
+    #[rstest]
+    #[should_panic(expected = "Unknown currency: UNKNOWN_FROM_PANIC")]
+    fn test_from_unknown_code_panics_with_display_error() {
+        let _: Currency = Currency::from("UNKNOWN_FROM_PANIC");
     }
 
     #[rstest]
@@ -485,7 +551,7 @@ mod tests {
     fn test_get_or_create_crypto_existing() {
         // Test with an existing currency (BTC is in the default map)
         let currency = Currency::get_or_create_crypto("BTC");
-        assert_eq!(currency.code.as_str(), "BTC");
+        assert_eq!(currency.code, "BTC");
         assert_eq!(currency.currency_type, CurrencyType::Crypto);
     }
 
@@ -493,10 +559,10 @@ mod tests {
     fn test_get_or_create_crypto_new() {
         // Test with a non-existent currency code
         let currency = Currency::get_or_create_crypto("NEWCOIN");
-        assert_eq!(currency.code.as_str(), "NEWCOIN");
+        assert_eq!(currency.code, "NEWCOIN");
         assert_eq!(currency.precision, 8);
         assert_eq!(currency.iso4217, 0);
-        assert_eq!(currency.name.as_str(), "NEWCOIN");
+        assert_eq!(currency.name, "NEWCOIN");
         assert_eq!(currency.currency_type, CurrencyType::Crypto);
 
         // Verify it was registered and can be retrieved
@@ -523,7 +589,7 @@ mod tests {
         // Test that it works with Ustr (via AsRef<str>)
         let code = Ustr::from("USTRCOIN");
         let currency = Currency::get_or_create_crypto(code);
-        assert_eq!(currency.code.as_str(), "USTRCOIN");
+        assert_eq!(currency.code, "USTRCOIN");
         assert_eq!(currency.currency_type, CurrencyType::Crypto);
     }
 
@@ -549,7 +615,7 @@ mod tests {
     fn test_get_or_create_crypto_with_context_unknown() {
         // Unknown codes should create a new Currency, preserving newly listed assets
         let result = Currency::get_or_create_crypto_with_context("NEWCOIN", Some("test context"));
-        assert_eq!(result.code.as_str(), "NEWCOIN");
+        assert_eq!(result.code, "NEWCOIN");
         assert_eq!(result.precision, 8);
     }
 }

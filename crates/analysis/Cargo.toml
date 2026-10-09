@@ -1,0 +1,45 @@
+[package]
+name = "nice-analysis"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Performance analysis and statistics for the nice trading engine"
+categories.workspace = true
+keywords.workspace = true
+documentation.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "nice_analysis"
+crate-type = ["rlib"]
+
+[features]
+default = []
+
+
+[package.metadata.docs.rs]
+# Python docs depend on the local pyo3-stub-gen patch for now, which published crates do not carry
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+nice-core = { workspace = true }
+nice-model = { workspace = true }
+
+ahash = { workspace = true }
+anyhow = { workspace = true }
+indexmap = { workspace = true }
+log = { workspace = true }
+rust_decimal = { workspace = true }
+
+
+
+[dev-dependencies]
+nice-model = { workspace = true, features = ["test-support"] }
+
+rstest = { workspace = true }

@@ -1,52 +1,63 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : database.rs
-//  @Author       : dyntrait Created On 2026/1/5 15:45
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
 
 //! Provides a `Cache` database backing.
 
-// Under development
-#![allow(dead_code)]
-#![allow(unused_variables)]
+use std::fmt::Debug;
 
 use ahash::AHashMap;
 use bytes::Bytes;
-use nice_core::UnixNanos;
+use nice_core::{UUID4, UnixNanos};
 use nice_model::{
     accounts::AccountAny,
-    data::{Bar, DataType, GreeksData, QuoteTick, TradeTick, YieldCurveData},
+    data::{
+        Bar, CustomData, DataType, FundingRateUpdate, InstrumentClose, QuoteTick, TradeTick,
+        greeks::{GreeksData, YieldCurveData},
+    },
     events::{OrderEventAny, OrderSnapshot, position::snapshot::PositionSnapshot},
     identifiers::{
-        AccountId, ClientId, ClientOrderId, ComponentId, InstrumentId, PositionId, StrategyId,
-        VenueOrderId,
+        AccountId, ActorId, ClientId, ClientOrderId, InstrumentId, PositionId, StrategyId,
+        TraderId, VenueOrderId,
     },
     instruments::{InstrumentAny, SyntheticInstrument},
     orderbook::OrderBook,
     orders::OrderAny,
     position::Position,
-    types::Currency,
+    types::{Currency, Money},
 };
 use ustr::Ustr;
 
-use crate::{custom::CustomData, signal::Signal};
+use super::config::CacheConfig;
+use crate::signal::Signal;
 
 #[derive(Debug, Default)]
 pub struct CacheMap {
     pub currencies: AHashMap<Ustr, Currency>,
     pub instruments: AHashMap<InstrumentId, InstrumentAny>,
+    pub instrument_closes: AHashMap<InstrumentId, InstrumentClose>,
     pub synthetics: AHashMap<InstrumentId, SyntheticInstrument>,
     pub accounts: AHashMap<AccountId, AccountAny>,
     pub orders: AHashMap<ClientOrderId, OrderAny>,
     pub positions: AHashMap<PositionId, Position>,
     pub greeks: AHashMap<InstrumentId, GreeksData>,
     pub yield_curves: AHashMap<String, YieldCurveData>,
+}
+
+/// Factory for constructing cache database adapters at runtime.
+///
+/// Implementations own the concrete database configuration and return the transport-neutral
+/// [`CacheDatabaseAdapter`] surface used by the cache.
+#[async_trait::async_trait]
+pub trait CacheDatabaseFactory: Debug + Send + Sync {
+    /// Creates a cache database adapter for the given cache runtime.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if adapter construction or connection setup fails.
+    async fn create(
+        &self,
+        trader_id: TraderId,
+        instance_id: UUID4,
+        config: CacheConfig,
+    ) -> anyhow::Result<Box<dyn CacheDatabaseAdapter>>;
 }
 
 #[async_trait::async_trait]
@@ -92,6 +103,15 @@ pub trait CacheDatabaseAdapter {
     ///
     /// Returns an error if loading instruments fails.
     async fn load_instruments(&self) -> anyhow::Result<AHashMap<InstrumentId, InstrumentAny>>;
+
+    /// Loads all instrument closes from the cache.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if loading instrument closes fails.
+    async fn load_instrument_closes(
+        &self,
+    ) -> anyhow::Result<AHashMap<InstrumentId, InstrumentClose>>;
 
     /// Loads all synthetic instruments from the cache.
     ///
@@ -144,7 +164,7 @@ pub trait CacheDatabaseAdapter {
     /// # Errors
     ///
     /// Returns an error if loading the index order-position mapping fails.
-    fn load_index_order_position(&self) -> anyhow::Result<AHashMap<ClientOrderId, Position>>;
+    fn load_index_order_position(&self) -> anyhow::Result<AHashMap<ClientOrderId, PositionId>>;
 
     /// Loads mapping from order IDs to client IDs.
     ///
@@ -193,7 +213,7 @@ pub trait CacheDatabaseAdapter {
     ///
     /// Returns an error if loading a single order fails.
     async fn load_order(&self, client_order_id: &ClientOrderId)
-                        -> anyhow::Result<Option<OrderAny>>;
+    -> anyhow::Result<Option<OrderAny>>;
 
     /// Loads a single position by position ID.
     ///
@@ -202,12 +222,12 @@ pub trait CacheDatabaseAdapter {
     /// Returns an error if loading a single position fails.
     async fn load_position(&self, position_id: &PositionId) -> anyhow::Result<Option<Position>>;
 
-    /// Loads actor state by component ID.
+    /// Loads actor state by actor ID.
     ///
     /// # Errors
     ///
     /// Returns an error if loading actor state fails.
-    fn load_actor(&self, component_id: &ComponentId) -> anyhow::Result<AHashMap<String, Bytes>>;
+    fn load_actor(&self, actor_id: &ActorId) -> anyhow::Result<AHashMap<String, Bytes>>;
 
     /// Loads strategy state by strategy ID.
     ///
@@ -264,6 +284,16 @@ pub trait CacheDatabaseAdapter {
     /// Returns an error if loading trades fails.
     fn load_trades(&self, instrument_id: &InstrumentId) -> anyhow::Result<Vec<TradeTick>>;
 
+    /// Loads funding rate updates by instrument ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if loading funding rates fails.
+    fn load_funding_rates(
+        &self,
+        instrument_id: &InstrumentId,
+    ) -> anyhow::Result<Vec<FundingRateUpdate>>;
+
     /// Loads bars by instrument ID.
     ///
     /// # Errors
@@ -291,6 +321,15 @@ pub trait CacheDatabaseAdapter {
     ///
     /// Returns an error if adding an instrument fails.
     fn add_instrument(&self, instrument: &InstrumentAny) -> anyhow::Result<()>;
+
+    /// Adds an instrument close to the cache, replacing any existing value for the instrument.
+    /// Implementations must queue persistence without waiting for the database operation to
+    /// complete.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the instrument close cannot be queued for persistence.
+    fn add_instrument_close(&self, close: &InstrumentClose) -> anyhow::Result<()>;
 
     /// Adds a synthetic instrument to the cache.
     ///
@@ -369,6 +408,13 @@ pub trait CacheDatabaseAdapter {
     /// Returns an error if adding a trade tick fails.
     fn add_trade(&self, trade: &TradeTick) -> anyhow::Result<()>;
 
+    /// Adds a funding rate update to the cache.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if adding a funding rate update fails.
+    fn add_funding_rate(&self, funding_rate: &FundingRateUpdate) -> anyhow::Result<()>;
+
     /// Adds a bar to the cache.
     ///
     /// # Errors
@@ -381,7 +427,7 @@ pub trait CacheDatabaseAdapter {
     /// # Errors
     ///
     /// Returns an error if adding greeks data fails.
-    fn add_greeks(&self, greeks: &GreeksData) -> anyhow::Result<()> {
+    fn add_greeks(&self, _greeks: &GreeksData) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -390,7 +436,7 @@ pub trait CacheDatabaseAdapter {
     /// # Errors
     ///
     /// Returns an error if adding yield curve data fails.
-    fn add_yield_curve(&self, yield_curve: &YieldCurveData) -> anyhow::Result<()> {
+    fn add_yield_curve(&self, _yield_curve: &YieldCurveData) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -399,7 +445,7 @@ pub trait CacheDatabaseAdapter {
     /// # Errors
     ///
     /// Returns an error if deleting actor state fails.
-    fn delete_actor(&self, component_id: &ComponentId) -> anyhow::Result<()>;
+    fn delete_actor(&self, actor_id: &ActorId) -> anyhow::Result<()>;
 
     /// Deletes strategy state from the cache.
     ///
@@ -451,19 +497,40 @@ pub trait CacheDatabaseAdapter {
         position_id: PositionId,
     ) -> anyhow::Result<()>;
 
+    /// Indexes order-client mappings as one batch operation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if batch order-client indexing is unsupported or cannot be enqueued.
+    fn index_order_clients(&self, claims: &[(ClientOrderId, ClientId)]) -> anyhow::Result<()> {
+        if claims.is_empty() {
+            return Ok(());
+        }
+
+        anyhow::bail!("Batch order-client indexing is not supported by this cache database")
+    }
+
     /// Updates actor state in the cache.
     ///
     /// # Errors
     ///
     /// Returns an error if updating actor state fails.
-    fn update_actor(&self) -> anyhow::Result<()>;
+    fn update_actor(
+        &self,
+        actor_id: &ActorId,
+        state: &AHashMap<String, Bytes>,
+    ) -> anyhow::Result<()>;
 
     /// Updates strategy state in the cache.
     ///
     /// # Errors
     ///
     /// Returns an error if updating strategy state fails.
-    fn update_strategy(&self) -> anyhow::Result<()>;
+    fn update_strategy(
+        &self,
+        strategy_id: &StrategyId,
+        state: &AHashMap<String, Bytes>,
+    ) -> anyhow::Result<()>;
 
     /// Updates an account in the cache.
     ///
@@ -498,7 +565,12 @@ pub trait CacheDatabaseAdapter {
     /// # Errors
     ///
     /// Returns an error if snapshotting position state fails.
-    fn snapshot_position_state(&self, position: &Position) -> anyhow::Result<()>;
+    fn snapshot_position_state(
+        &self,
+        position: &Position,
+        ts_snapshot: UnixNanos,
+        unrealized_pnl: Option<Money>,
+    ) -> anyhow::Result<()>;
 
     /// Records a heartbeat timestamp.
     ///

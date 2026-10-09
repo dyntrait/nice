@@ -1,0 +1,141 @@
+[package]
+name = "nice-architect-ax"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "AX Exchange integration adapter for the nice trading engine"
+categories.workspace = true
+keywords.workspace = true
+documentation.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "nice_architect_ax"
+crate-type = ["rlib"]
+
+[features]
+default = []
+examples = ["nice-live/node", "nice-network/transport-sockudo"]
+
+
+
+[package.metadata.cargo-machete]
+ignored = [
+  "nice-system",
+] # Optional dep activated only via the python feature
+
+[package.metadata.docs.rs]
+# Python docs depend on the local pyo3-stub-gen patch for now, which published crates do not carry
+features = ["examples"]
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+nice-common = { workspace = true, features = ["live"] }
+nice-core = { workspace = true }
+nice-live = { workspace = true }
+nice-model = { workspace = true }
+nice-network = { workspace = true, features = ["transport-sockudo"] }
+nice-system = { workspace = true, optional = true }
+
+ahash = { workspace = true }
+anyhow = { workspace = true }
+arc-swap = { workspace = true }
+async-stream = { workspace = true }
+async-trait = { workspace = true }
+blake3 = { workspace = true }
+bon = { workspace = true }
+dashmap = { workspace = true }
+dotenvy = { workspace = true }
+futures-util = { workspace = true }
+jiff = { workspace = true }
+log = { workspace = true }
+parking_lot = { workspace = true }
+reqwest = { workspace = true }
+rust_decimal = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_urlencoded = { workspace = true }
+strum = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+tokio-util = { workspace = true }
+ustr = { workspace = true }
+zeroize = { workspace = true }
+
+pyo3 = { workspace = true, optional = true }
+pyo3-async-runtimes = { workspace = true, optional = true }
+pyo3-stub-gen = { workspace = true, optional = true }
+
+[dev-dependencies]
+nice-testkit = { workspace = true, default-features = false, features = [
+  "testers",
+] }
+nice-trading = { workspace = true }
+
+axum = { workspace = true }
+criterion = { workspace = true }
+rstest = { workspace = true }
+rust_decimal_macros = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
+toml = { workspace = true }
+
+# cargo bench -p nice-architect-ax --bench deserialization
+[[bench]]
+name = "deserialization"
+path = "benches/deserialization.rs"
+harness = false
+
+# cargo bench -p nice-architect-ax --bench parsing
+[[bench]]
+name = "parsing"
+path = "benches/parsing.rs"
+harness = false
+
+# cargo run -p nice-architect-ax --bin ax-http-public
+[[bin]]
+name = "ax-http-public"
+path = "bin/http_public.rs"
+doc = false
+test = false
+
+# cargo run -p nice-architect-ax --bin ax-ws-data
+[[bin]]
+name = "ax-ws-data"
+path = "bin/ws_data.rs"
+doc = false
+test = false
+
+# cargo run -p nice-architect-ax --bin ax-ws-orders
+[[bin]]
+name = "ax-ws-orders"
+path = "bin/ws_orders.rs"
+doc = false
+test = false
+
+# cargo run -p nice-architect-ax --bin ax-flatten
+[[bin]]
+name = "ax-flatten"
+path = "bin/flatten.rs"
+doc = false
+test = false
+
+# cargo run --example ax-data-tester -p nice-architect-ax --features examples
+[[example]]
+name = "ax-data-tester"
+path = "examples/node_data_tester.rs"
+required-features = ["examples"]
+doc = false
+
+# cargo run --example ax-exec-tester -p nice-architect-ax --features examples
+[[example]]
+name = "ax-exec-tester"
+path = "examples/node_exec_tester.rs"
+required-features = ["examples"]
+doc = false

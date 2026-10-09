@@ -1,14 +1,4 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : collect.rs
-//  @Author       : dyntrait Created On 2026/1/5 14:32
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 use std::fmt::Display;
 
@@ -23,10 +13,7 @@ use crate::{
 
 /// Represents a fee collection event in a decentralized exchange (DEX) pool.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nice_trader.core.nice_pyo3.model")
-)]
+
 pub struct PoolFeeCollect {
     /// The blockchain network where the fee collection occurred.
     pub chain: SharedChain,
@@ -38,6 +25,9 @@ pub struct PoolFeeCollect {
     pub pool_identifier: PoolIdentifier,
     /// The blockchain block number where the fee collection occurred.
     pub block: u64,
+    /// The hash of the block observed when this collection was ingested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_hash: Option<String>,
     /// The unique hash identifier of the blockchain transaction containing the fee collection.
     pub transaction_hash: String,
     /// The index position of the transaction within the block.
@@ -54,16 +44,16 @@ pub struct PoolFeeCollect {
     pub tick_lower: i32,
     /// The upper price tick boundary of the liquidity position.
     pub tick_upper: i32,
-    /// The timestamp of the fee collection in Unix nanoseconds.
-    pub timestamp: Option<UnixNanos>,
+    /// UNIX timestamp (nanoseconds) when the fee collection event occurred.
+    pub ts_event: UnixNanos,
     /// UNIX timestamp (nanoseconds) when the instance was created.
-    pub ts_init: Option<UnixNanos>,
+    pub ts_init: UnixNanos,
 }
 
 impl PoolFeeCollect {
     /// Creates a new [`PoolFeeCollect`] instance with the specified properties.
     #[must_use]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub const fn new(
         chain: SharedChain,
         dex: SharedDex,
@@ -78,7 +68,8 @@ impl PoolFeeCollect {
         amount1: u128,
         tick_lower: i32,
         tick_upper: i32,
-        timestamp: Option<UnixNanos>,
+        ts_event: UnixNanos,
+        ts_init: UnixNanos,
     ) -> Self {
         Self {
             chain,
@@ -86,6 +77,7 @@ impl PoolFeeCollect {
             instrument_id,
             pool_identifier,
             block,
+            block_hash: None,
             transaction_hash,
             transaction_index,
             log_index,
@@ -94,8 +86,8 @@ impl PoolFeeCollect {
             amount1,
             tick_lower,
             tick_upper,
-            timestamp,
-            ts_init: timestamp,
+            ts_event,
+            ts_init,
         }
     }
 }

@@ -1,14 +1,4 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2025 dyntrait. All rights reserved.
-//
-//  @File         : paths.rs
-//  @Author       : dyntrait
-//  @Description  :
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 //! Utility functions for resolving project and workspace directory paths.
 
@@ -16,34 +6,32 @@ use std::path::PathBuf;
 
 /// Returns the workspace root directory path.
 ///
+/// This is the directory containing the top-level `Cargo.toml` with the
+/// `[workspace]` section, typically where `python/` and `docs/` are located.
+///
 /// # Panics
 ///
-/// Panics if the `CARGO_MANIFEST_DIR` environment variable is not set or its parent directory cannot be determined.
+/// Panics if the `CARGO_MANIFEST_DIR` environment variable is not set or
+/// the parent directories cannot be determined.
 #[must_use]
 pub fn get_workspace_root_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")) // 在 Rust 的开发生态中，CARGO_MANIFEST_DIR 是一个非常实用的环境变量，它由 Cargo 在编译时自动设置。
-        .parent()
-        .expect("Failed to get project root")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent() // crates/core -> crates/
+        .and_then(|p| p.parent()) // crates/ -> nice_trader/
+        .expect("Failed to get workspace root")
         .to_path_buf()
 }
 
 /// Returns the project root directory path.
 ///
+/// For this monorepo, the project root is the same as the workspace root.
+///
 /// # Panics
 ///
-/// Panics if the workspace root path cannot be determined or its parent directory is missing.
+/// Panics if the workspace root path cannot be determined.
 #[must_use]
 pub fn get_project_root_path() -> PathBuf {
     get_workspace_root_path()
-        .parent()
-        .expect("Failed to get workspace root")
-        .to_path_buf()
-}
-
-/// Returns the tests root directory path.
-#[must_use]
-pub fn get_tests_root_path() -> PathBuf {
-    get_project_root_path().join("tests")
 }
 
 /// Returns the test data directory path.
@@ -54,6 +42,45 @@ pub fn get_test_data_path() -> PathBuf {
             .join(test_data_root_path)
             .join("test_data")
     } else {
-        get_project_root_path().join("tests").join("test_data")
+        get_project_root_path().join("test_data")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    fn test_workspace_root_contains_python_pyproject() {
+        let root = get_workspace_root_path();
+        assert!(
+            root.join("python/pyproject.toml").is_file(),
+            "Workspace root should contain python/pyproject.toml, was: {root:?}"
+        );
+    }
+
+    #[rstest]
+    fn test_workspace_root_contains_crates_dir() {
+        let root = get_workspace_root_path();
+        assert!(
+            root.join("crates").is_dir(),
+            "Workspace root should contain crates/ directory, was: {root:?}"
+        );
+    }
+
+    #[rstest]
+    fn test_project_root_equals_workspace_root() {
+        assert_eq!(get_project_root_path(), get_workspace_root_path());
+    }
+
+    #[rstest]
+    fn test_test_data_path_contains_checksum_manifest() {
+        let test_data = get_test_data_path();
+        assert!(
+            test_data.join("large/checksums.json").is_file(),
+            "Test data should contain the large-file checksum manifest, path: {test_data:?}"
+        );
     }
 }

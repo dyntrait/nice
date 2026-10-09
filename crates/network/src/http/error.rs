@@ -1,16 +1,8 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2026  dyntrait  All rights reserved.
-//  All Rights Reserved
-//
-//  @File         : error.rs
-//  @Author       : dyntrait
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
+
 //! HTTP client error types.
+
+use std::error::Error;
 
 /// Errors returned by the HTTP client.
 ///
@@ -19,6 +11,9 @@
 pub enum HttpClientError {
     #[error("HTTP error occurred: {0}")]
     Error(String),
+
+    #[error("HTTP transport error: {0}")]
+    TransportError(String),
 
     #[error("HTTP request timed out: {0}")]
     TimeoutError(String),
@@ -32,10 +27,22 @@ pub enum HttpClientError {
 
 impl From<reqwest::Error> for HttpClientError {
     fn from(source: reqwest::Error) -> Self {
+        // reqwest's Display omits the actionable cause (DNS, refused, TLS),
+        // which lives in the source chain, so walk and append it.
+        let mut message = source.to_string();
+        let mut cause: Option<&(dyn std::error::Error + 'static)> = source.source();
+        while let Some(err) = cause {
+            message.push_str(": ");
+            message.push_str(&err.to_string());
+            cause = err.source();
+        }
+
         if source.is_timeout() {
-            Self::TimeoutError(source.to_string())
+            Self::TimeoutError(message)
+        } else if source.is_request() || source.is_body() || source.is_decode() {
+            Self::TransportError(message)
         } else {
-            Self::Error(source.to_string())
+            Self::Error(message)
         }
     }
 }

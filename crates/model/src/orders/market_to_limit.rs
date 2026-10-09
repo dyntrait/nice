@@ -1,14 +1,3 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : market_to_limit.rs
-//  @Author       : dyntrait Created On 2026/1/5 14:05
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
 
 use std::{
     fmt::Display,
@@ -37,10 +26,6 @@ use crate::{
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nice_trader.core.nice_pyo3.model")
-)]
 pub struct MarketToLimitOrder {
     core: OrderCore,
     pub price: Option<Price>,
@@ -58,7 +43,8 @@ impl MarketToLimitOrder {
     /// - The `quantity` is not positive.
     /// - The `display_qty` (when provided) exceeds `quantity`.
     /// - The `time_in_force` is `GTD` **and** `expire_time` is `None` or zero.
-    #[allow(clippy::too_many_arguments)]
+    /// - The order metadata violates an [`OrderInitialized::new_checked`] invariant.
+    #[expect(clippy::too_many_arguments)]
     pub fn new_checked(
         trader_id: TraderId,
         strategy_id: StrategyId,
@@ -82,12 +68,12 @@ impl MarketToLimitOrder {
         tags: Option<Vec<Ustr>>,
         init_id: UUID4,
         ts_init: UnixNanos,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, OrderError> {
         check_positive_quantity(quantity, stringify!(quantity))?;
         check_display_qty(display_qty, quantity)?;
         check_time_in_force(time_in_force, expire_time)?;
 
-        let init_order = OrderInitialized::new(
+        let init_order = OrderInitialized::new_checked(
             trader_id,
             strategy_id,
             instrument_id,
@@ -109,9 +95,10 @@ impl MarketToLimitOrder {
             None,
             None,
             None,
+            None,
             expire_time,
             display_qty,
-            Some(TriggerType::NoTrigger),
+            None,
             None,
             contingency_type,
             order_list_id,
@@ -121,7 +108,7 @@ impl MarketToLimitOrder {
             exec_algorithm_params,
             exec_spawn_id,
             tags,
-        );
+        )?;
 
         Ok(Self {
             core: OrderCore::new(init_order),
@@ -137,7 +124,8 @@ impl MarketToLimitOrder {
     /// # Panics
     ///
     /// Panics if any order validation fails (see [`MarketToLimitOrder::new_checked`]).
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         trader_id: TraderId,
         strategy_id: StrategyId,
@@ -186,7 +174,13 @@ impl MarketToLimitOrder {
             init_id,
             ts_init,
         )
-            .expect(FAILED)
+        .unwrap_or_else(|e| panic!("{FAILED}: {e}"))
+    }
+}
+
+impl PartialEq for MarketToLimitOrder {
+    fn eq(&self, other: &Self) -> bool {
+        self.client_order_id == other.client_order_id
     }
 }
 
@@ -365,6 +359,10 @@ impl Order for MarketToLimitOrder {
         self.filled_qty
     }
 
+    fn voided_qty(&self) -> Quantity {
+        self.voided_qty
+    }
+
     fn leaves_qty(&self) -> Quantity {
         self.leaves_qty
     }
@@ -373,11 +371,11 @@ impl Order for MarketToLimitOrder {
         self.overfill_qty
     }
 
-    fn avg_px(&self) -> Option<f64> {
+    fn avg_px(&self) -> Option<Decimal> {
         self.avg_px
     }
 
-    fn slippage(&self) -> Option<f64> {
+    fn slippage(&self) -> Option<Decimal> {
         self.slippage
     }
 
@@ -422,14 +420,18 @@ impl Order for MarketToLimitOrder {
     }
 
     fn apply(&mut self, event: OrderEventAny) -> Result<(), OrderError> {
+        let updates_slippage = matches!(
+            event,
+            OrderEventAny::Filled(_) | OrderEventAny::FillVoided(_),
+        );
+
+        self.core.apply(event.clone())?;
+
         if let OrderEventAny::Updated(ref event) = event {
             self.update(event);
-        };
-        let is_order_filled = matches!(event, OrderEventAny::Filled(_));
+        }
 
-        self.core.apply(event)?;
-
-        if is_order_filled && let Some(price) = self.price {
+        if updates_slippage && let Some(price) = self.price {
             self.core.set_slippage(price);
         }
 
@@ -526,9 +528,11 @@ impl Display for MarketToLimitOrder {
     }
 }
 
-impl From<OrderInitialized> for MarketToLimitOrder {
-    fn from(event: OrderInitialized) -> Self {
-        Self::new(
+impl TryFrom<OrderInitialized> for MarketToLimitOrder {
+    type Error = OrderError;
+
+    fn try_from(event: OrderInitialized) -> Result<Self, Self::Error> {
+        Self::new_checked(
             event.trader_id,
             event.strategy_id,
             event.instrument_id,
@@ -558,11 +562,12 @@ impl From<OrderInitialized> for MarketToLimitOrder {
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
+    use rust_decimal_macros::dec;
 
     use super::*;
     use crate::{
         enums::{OrderSide, OrderType, TimeInForce},
-        events::order::{filled::OrderFilledBuilder, initialized::OrderInitializedBuilder},
+        events::order::spec::{OrderFilledSpec, OrderInitializedSpec},
         identifiers::{InstrumentId, TradeId, VenueOrderId},
         instruments::{CurrencyPair, stubs::*},
         orders::{builder::OrderTestBuilder, stubs::TestOrderStubs},
@@ -570,9 +575,9 @@ mod tests {
     };
 
     #[rstest]
-    fn test_initialize(_audusd_sim: CurrencyPair) {
+    fn test_initialize(audusd_sim: CurrencyPair) {
         let order = OrderTestBuilder::new(OrderType::MarketToLimit)
-            .instrument_id(_audusd_sim.id)
+            .instrument_id(audusd_sim.id)
             .side(OrderSide::Buy)
             .price(Price::from("0.68000"))
             .quantity(Quantity::from(1))
@@ -666,9 +671,38 @@ mod tests {
     }
 
     #[rstest]
+    fn test_market_to_limit_order_rejects_invalid_update_atomically() {
+        let order = OrderTestBuilder::new(OrderType::MarketToLimit)
+            .instrument_id(InstrumentId::from("BTC-USDT.BINANCE"))
+            .quantity(Quantity::from(10))
+            .build();
+        let mut accepted_order = TestOrderStubs::make_accepted_order(&order);
+        let state = (
+            accepted_order.status(),
+            accepted_order.previous_status(),
+            accepted_order.ts_last(),
+            accepted_order.events().len(),
+        );
+        let event = OrderUpdated {
+            client_order_id: accepted_order.client_order_id(),
+            strategy_id: accepted_order.strategy_id(),
+            trigger_price: Some(Price::new(95.0, 2)),
+            ..Default::default()
+        };
+
+        let result = accepted_order.apply(OrderEventAny::Updated(event));
+
+        assert!(matches!(result, Err(OrderError::InvalidOrderEvent)));
+        assert_eq!(accepted_order.status(), state.0);
+        assert_eq!(accepted_order.previous_status(), state.1);
+        assert_eq!(accepted_order.ts_last(), state.2);
+        assert_eq!(accepted_order.events().len(), state.3);
+    }
+
+    #[rstest]
     fn test_market_to_limit_order_expire_time() {
         // Create a new MarketToLimitOrder with an expire time
-        let expire_time = UnixNanos::from(1234567890);
+        let expire_time = UnixNanos::from(1_234_567_890);
         let order = OrderTestBuilder::new(OrderType::MarketToLimit)
             .instrument_id(InstrumentId::from("BTC-USDT.BINANCE"))
             .quantity(Quantity::from(10))
@@ -682,13 +716,12 @@ mod tests {
     #[rstest]
     fn test_market_to_limit_order_from_order_initialized() {
         // Create an OrderInitialized event with all required fields for a MarketToLimitOrder
-        let order_initialized = OrderInitializedBuilder::default()
+        let order_initialized = OrderInitializedSpec::builder()
             .order_type(OrderType::MarketToLimit)
-            .build()
-            .unwrap();
+            .build();
 
         // Convert the OrderInitialized event into a MarketToLimitOrder
-        let order: MarketToLimitOrder = order_initialized.clone().into();
+        let order: MarketToLimitOrder = order_initialized.clone().try_into().unwrap();
 
         // Assert essential fields match the OrderInitialized fields
         assert_eq!(order.trader_id(), order_initialized.trader_id);
@@ -733,7 +766,7 @@ mod tests {
         let fill_quantity = accepted_order.quantity();
         let fill_price = Price::new(98.50, 2);
 
-        let order_filled_event = OrderFilledBuilder::default()
+        let order_filled_event = OrderFilledSpec::builder()
             .client_order_id(accepted_order.client_order_id())
             .strategy_id(accepted_order.strategy_id())
             .instrument_id(accepted_order.instrument_id())
@@ -742,19 +775,14 @@ mod tests {
             .last_px(fill_price)
             .venue_order_id(VenueOrderId::from("TEST-001"))
             .trade_id(TradeId::from("TRADE-001"))
-            .build()
-            .unwrap();
+            .build();
 
         // Apply the fill event
         accepted_order
             .apply(OrderEventAny::Filled(order_filled_event))
             .unwrap();
 
-        // The slippage calculation should be triggered by the filled event
-        assert!(accepted_order.slippage().is_some());
-
-        // Additionally, verify the actual slippage value is correct
-        // The slippage would be 98.50 - 90.0 = 8.50 for a Buy order
-        assert_eq!(accepted_order.slippage().unwrap(), 8.50);
+        // The fill triggers the slippage calculation: 98.50 - 90.0 for a buy order
+        assert_eq!(accepted_order.slippage(), Some(dec!(8.50)));
     }
 }

@@ -23,21 +23,21 @@ cargo install cargo-edit
 cargo upgrade
 ```
 
-# <img src="https://github.com/nautechsystems/nautilus_trader/raw/develop/assets/nautilus-trader-logo.png" width="500">
+# <img src="https://github.com/nautechsystems/Nice_trader/raw/develop/assets/Nice-trader-logo.png" width="500">
 
-[![codecov](https://codecov.io/gh/nautechsystems/nautilus_trader/branch/master/graph/badge.svg?token=DXO9QQI40H)](https://codecov.io/gh/nautechsystems/nautilus_trader)
-[![codspeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://codspeed.io/nautechsystems/nautilus_trader)
-![pythons](https://img.shields.io/pypi/pyversions/nautilus_trader)
-![pypi-version](https://img.shields.io/pypi/v/nautilus_trader)
-![pypi-format](https://img.shields.io/pypi/format/nautilus_trader?color=blue)
-[![Downloads](https://pepy.tech/badge/nautilus-trader)](https://pepy.tech/project/nautilus-trader)
-[![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?logo=discord&logoColor=white)](https://discord.gg/NautilusTrader)
+[![codecov](https://codecov.io/gh/nautechsystems/Nice_trader/branch/master/graph/badge.svg?token=DXO9QQI40H)](https://codecov.io/gh/nautechsystems/Nice_trader)
+[![codspeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://codspeed.io/nautechsystems/Nice_trader)
+![pythons](https://img.shields.io/pypi/pyversions/Nice_trader)
+![pypi-version](https://img.shields.io/pypi/v/Nice_trader)
+![pypi-format](https://img.shields.io/pypi/format/Nice_trader?color=blue)
+[![Downloads](https://pepy.tech/badge/Nice-trader)](https://pepy.tech/project/Nice-trader)
+[![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?logo=discord&logoColor=white)](https://discord.gg/NiceTrader)
 
 | Branch    | Version                                                                                                                                                                                                                     | Status                                                                                                                                                                                            |
 | :-------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `master`  | [![version](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnautechsystems%2Fnautilus_trader%2Fmaster%2Fversion.json)](https://packages.nautechsystems.io/simple/nautilus-trader/index.html)  | [![build](https://github.com/nautechsystems/nautilus_trader/actions/workflows/build.yml/badge.svg?branch=nightly)](https://github.com/nautechsystems/nautilus_trader/actions/workflows/build.yml) |
-| `nightly` | [![version](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnautechsystems%2Fnautilus_trader%2Fnightly%2Fversion.json)](https://packages.nautechsystems.io/simple/nautilus-trader/index.html) | [![build](https://github.com/nautechsystems/nautilus_trader/actions/workflows/build.yml/badge.svg?branch=nightly)](https://github.com/nautechsystems/nautilus_trader/actions/workflows/build.yml) |
-| `develop` | [![version](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnautechsystems%2Fnautilus_trader%2Fdevelop%2Fversion.json)](https://packages.nautechsystems.io/simple/nautilus-trader/index.html) | [![build](https://github.com/nautechsystems/nautilus_trader/actions/workflows/build.yml/badge.svg?branch=develop)](https://github.com/nautechsystems/nautilus_trader/actions/workflows/build.yml) |
+| `master`  | [![version](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnautechsystems%2FNice_trader%2Fmaster%2Fversion.json)](https://packages.nautechsystems.io/simple/Nice-trader/index.html)  | [![build](https://github.com/nautechsystems/Nice_trader/actions/workflows/build.yml/badge.svg?branch=nightly)](https://github.com/nautechsystems/Nice_trader/actions/workflows/build.yml) |
+| `nightly` | [![version](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnautechsystems%2FNice_trader%2Fnightly%2Fversion.json)](https://packages.nautechsystems.io/simple/Nice-trader/index.html) | [![build](https://github.com/nautechsystems/Nice_trader/actions/workflows/build.yml/badge.svg?branch=nightly)](https://github.com/nautechsystems/Nice_trader/actions/workflows/build.yml) |
+| `develop` | [![version](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnautechsystems%2FNice_trader%2Fdevelop%2Fversion.json)](https://packages.nautechsystems.io/simple/Nice-trader/index.html) | [![build](https://github.com/nautechsystems/Nice_trader/actions/workflows/build.yml/badge.svg?branch=develop)](https://github.com/nautechsystems/Nice_trader/actions/workflows/build.yml) |
 
 | Platform           | Rust   | Python    |
 | :----------------- | :----- | :-------- |
@@ -46,13 +46,13 @@ cargo upgrade
 | `macOS (ARM64)`    | 1.90.0 | 3.11-3.13 |
 | `Windows (x86_64)` | 1.90.0 | 3.11-3.13 |
 
-- **Docs**: <https://nautilustrader.io/docs/>
-- **Website**: <https://nautilustrader.io>
-- **Support**: [support@nautilustrader.io](mailto:support@nautilustrader.io)
+- **Docs**: <https://Nicetrader.io/docs/>
+- **Website**: <https://Nicetrader.io>
+- **Support**: [support@Nicetrader.io](mailto:support@Nicetrader.io)
 
 ## Introduction
 
-NautilusTrader is an open-source, high-performance, production-grade algorithmic trading platform,
+NiceTrader is an open-source, high-performance, production-grade algorithmic trading platform,
 providing quantitative traders with the ability to backtest portfolios of automated trading strategies
 on historical data with an event-driven engine, and also deploy those same strategies live, with no code changes.
 
@@ -60,7 +60,7 @@ The platform is *AI-first*, designed to develop and deploy algorithmic trading s
 and robust Python-native environment. This helps to address the parity challenge of keeping the Python research/backtest
 environment consistent with the production live trading environment.
 
-NautilusTrader's design, architecture, and implementation philosophy prioritizes software correctness and safety at the
+NiceTrader's design, architecture, and implementation philosophy prioritizes software correctness and safety at the
 highest level, with the aim of supporting Python-native, mission-critical, trading system backtesting
 and live deployment workloads.
 
@@ -68,7 +68,7 @@ The platform is also universal, and asset-class-agnostic — with any REST API o
 adapters. It supports high-frequency trading across a wide range of asset classes and instrument types
 including FX, Equities, Futures, Options, Crypto, DeFi, and Betting — enabling seamless operations across multiple venues simultaneously.
 
-![nautilus-trader](https://github.com/nautechsystems/nautilus_trader/raw/develop/assets/nautilus-trader.png "nautilus-trader")
+![Nice-trader](https://github.com/nautechsystems/Nice_trader/raw/develop/assets/Nice-trader.png "Nice-trader")
 
 ## Features
 
@@ -77,20 +77,20 @@ including FX, Equities, Futures, Options, Crypto, DeFi, and Betting — enabling
 - **Portable**: OS independent, runs on Linux, macOS, and Windows. Deploy using Docker.
 - **Flexible**: Modular adapters mean any REST API or WebSocket feed can be integrated.
 - **Advanced**: Time in force `IOC`, `FOK`, `GTC`, `GTD`, `DAY`, `AT_THE_OPEN`, `AT_THE_CLOSE`, advanced order types and conditional triggers. Execution instructions `post-only`, `reduce-only`, and icebergs. Contingency orders including `OCO`, `OUO`, `OTO`.
-- **Customizable**: Add user-defined custom components, or assemble entire systems from scratch leveraging the [cache](https://nautilustrader.io/docs/latest/concepts/cache) and [message bus](https://nautilustrader.io/docs/latest/concepts/message_bus).
+- **Customizable**: Add user-defined custom components, or assemble entire systems from scratch leveraging the [cache](https://Nicetrader.io/docs/latest/concepts/cache) and [message bus](https://Nicetrader.io/docs/latest/concepts/message_bus).
 - **Backtesting**: Run with multiple venues, instruments and strategies simultaneously using historical quote tick, trade tick, bar, order book and custom data with nanosecond resolution.
 - **Live**: Use identical strategy implementations between backtesting and live deployments.
 - **Multi-venue**: Multiple venue capabilities facilitate market-making and statistical arbitrage strategies.
 - **AI Training**: Backtest engine fast enough to be used to train AI trading agents (RL/ES).
 
-![Alt text](https://github.com/nautechsystems/nautilus_trader/raw/develop/assets/nautilus-art.png "nautilus")
+![Alt text](https://github.com/nautechsystems/Nice_trader/raw/develop/assets/Nice-art.png "Nice")
 
-> *nautilus - from ancient Greek 'sailor' and naus 'ship'.*
+> *Nice - from ancient Greek 'sailor' and naus 'ship'.*
 >
-> *The nautilus shell consists of modular chambers with a growth factor which approximates a logarithmic spiral.
+> *The Nice shell consists of modular chambers with a growth factor which approximates a logarithmic spiral.
 > The idea is that this can be translated to the aesthetics of design and architecture.*
 
-## Why NautilusTrader?
+## Why NiceTrader?
 
 - **Highly performant event-driven Python**: Native binary core components.
 - **Parity between backtesting and live trading**: Identical strategy code.
@@ -103,7 +103,7 @@ using C++, C#, Java or other statically typed language(s). The reasoning here is
 express the granular time and event dependent complexity of real-time trading, where compiled languages have
 proven to be more suitable due to their inherently higher performance, and type safety.
 
-One of the key advantages of NautilusTrader here, is that this reimplementation step is now circumvented - as the critical core components of the platform
+One of the key advantages of NiceTrader here, is that this reimplementation step is now circumvented - as the critical core components of the platform
 have all been written entirely in [Rust](https://www.rust-lang.org/) or [Cython](https://cython.org/).
 This means we're using the right tools for the job, where systems programming languages compile performant binaries,
 with CPython C extension modules then able to offer a Python-native environment, suitable for professional quantitative traders and trading firms.
@@ -133,15 +133,15 @@ This project makes the [Soundness Pledge](https://raphlinus.github.io/rust/2020/
 
 > [!NOTE]
 >
-> **MSRV:** NautilusTrader relies heavily on improvements in the Rust language and compiler.
+> **MSRV:** NiceTrader relies heavily on improvements in the Rust language and compiler.
 > As a result, the Minimum Supported Rust Version (MSRV) is generally equal to the latest stable release of Rust.
 
 ## Integrations
 
-NautilusTrader is modularly designed to work with *adapters*, enabling connectivity to trading venues
+NiceTrader is modularly designed to work with *adapters*, enabling connectivity to trading venues
 and data providers by translating their raw APIs into a unified interface and normalized domain model.
 
-The following integrations are currently supported; see [docs/integrations/](https://nautilustrader.io/docs/latest/integrations/) for details:
+The following integrations are currently supported; see [docs/integrations/](https://Nicetrader.io/docs/latest/integrations/) for details:
 
 | Name                                                                         | ID                    | Type                    | Status                                                  | Docs                                        |
 | :--------------------------------------------------------------------------- | :-------------------- | :---------------------- | :------------------------------------------------------ | :------------------------------------------ |
@@ -167,13 +167,13 @@ The following integrations are currently supported; see [docs/integrations/](htt
 - `beta`: Completed to a minimally working state and in a beta testing phase.
 - `stable`: Stabilized feature set and API, the integration has been tested by both developers and users to a reasonable level (some bugs may still remain).
 
-See the [Integrations](https://nautilustrader.io/docs/latest/integrations/index.html) documentation for further details.
+See the [Integrations](https://Nicetrader.io/docs/latest/integrations/index.html) documentation for further details.
 
 ## Versioning and releases
 
 > [!WARNING]
 >
-> **NautilusTrader is still under active development**. Some features may be incomplete, and while
+> **NiceTrader is still under active development**. Some features may be incomplete, and while
 > the API is becoming more stable, breaking changes can occur between releases.
 > We strive to document these changes in the release notes on a **best-effort basis**.
 
@@ -195,7 +195,7 @@ We aim to maintain a stable, passing build across all branches.
 
 ## Precision mode
 
-NautilusTrader supports two precision modes for its core value types (`Price`, `Quantity`, `Money`),
+NiceTrader supports two precision modes for its core value types (`Price`, `Quantity`, `Money`),
 which differ in their internal bit-width and maximum decimal precision.
 
 - **High-precision**: 128-bit integers with up to 16 decimals of precision, and a larger value range.
@@ -207,18 +207,18 @@ which differ in their internal bit-width and maximum decimal precision.
 > On Windows, only standard-precision (64-bit) is available due to the lack of native 128-bit integer support.
 > For the Rust crates, the default is standard-precision unless you explicitly enable the `high-precision` feature flag.
 
-See the [Installation Guide](https://nautilustrader.io/docs/latest/getting_started/installation) for further details.
+See the [Installation Guide](https://Nicetrader.io/docs/latest/getting_started/installation) for further details.
 
 **Rust feature flag**: To enable high-precision mode in Rust, add the `high-precision` feature to your Cargo.toml:
 
 ```toml
 [dependencies]
-nautilus_model = { version = "*", features = ["high-precision"] }
+Nice_model = { version = "*", features = ["high-precision"] }
 ```
 
 ## Installation
 
-We recommend using the latest supported version of Python and installing [nautilus_trader](https://pypi.org/project/nautilus_trader/) inside a virtual environment to isolate dependencies.
+We recommend using the latest supported version of Python and installing [Nice_trader](https://pypi.org/project/Nice_trader/) inside a virtual environment to isolate dependencies.
 
 **There are two supported ways to install**:
 
@@ -236,22 +236,22 @@ We recommend using the latest supported version of Python and installing [nautil
 To install the latest binary wheel (or sdist package) from PyPI using Python's pip package manager:
 
 ```bash
-pip install -U nautilus_trader
+pip install -U Nice_trader
 ```
 
 ### From the Nautech Systems package index
 
-The Nautech Systems package index (`packages.nautechsystems.io`) complies with [PEP-503](https://peps.python.org/pep-0503/) and hosts both stable and development binary wheels for `nautilus_trader`.
+The Nautech Systems package index (`packages.nautechsystems.io`) complies with [PEP-503](https://peps.python.org/pep-0503/) and hosts both stable and development binary wheels for `Nice_trader`.
 This enables users to install either the latest stable release or pre-release versions for testing.
 
 #### Stable wheels
 
-Stable wheels correspond to official releases of `nautilus_trader` on PyPI, and use standard versioning.
+Stable wheels correspond to official releases of `Nice_trader` on PyPI, and use standard versioning.
 
 To install the latest stable release:
 
 ```bash
-pip install -U nautilus_trader --index-url=https://packages.nautechsystems.io/simple
+pip install -U Nice_trader --index-url=https://packages.nautechsystems.io/simple
 ```
 
 > [!TIP]
@@ -290,23 +290,23 @@ By default, pip will install the latest stable release. Adding the `--pre` flag 
 To install the latest available pre-release (including development wheels):
 
 ```bash
-pip install -U nautilus_trader --pre --index-url=https://packages.nautechsystems.io/simple
+pip install -U Nice_trader --pre --index-url=https://packages.nautechsystems.io/simple
 ```
 
 To install a specific development wheel (e.g., `1.221.0a20250912` for September 12, 2025):
 
 ```bash
-pip install nautilus_trader==1.221.0a20250912 --index-url=https://packages.nautechsystems.io/simple
+pip install Nice_trader==1.221.0a20250912 --index-url=https://packages.nautechsystems.io/simple
 ```
 
 #### Available versions
 
-You can view all available versions of `nautilus_trader` on the [package index](https://packages.nautechsystems.io/simple/nautilus-trader/index.html).
+You can view all available versions of `Nice_trader` on the [package index](https://packages.nautechsystems.io/simple/Nice-trader/index.html).
 
 To programmatically fetch and list available versions:
 
 ```bash
-curl -s https://packages.nautechsystems.io/simple/nautilus-trader/index.html | grep -oP '(?<=<a href=")[^"]+(?=")' | awk -F'#' '{print $1}' | sort
+curl -s https://packages.nautechsystems.io/simple/Nice-trader/index.html | grep -oP '(?<=<a href=")[^"]+(?=")' | awk -F'#' '{print $1}' | sort
 ```
 
 > [!NOTE]
@@ -386,8 +386,8 @@ It's possible to install from source using pip if you first install the build de
 5. Clone the source with `git`, and install from the project's root directory:
 
     ```bash
-    git clone --branch develop --depth 1 https://github.com/nautechsystems/nautilus_trader
-    cd nautilus_trader
+    git clone --branch develop --depth 1 https://github.com/nautechsystems/Nice_trader
+    cd Nice_trader
     uv sync --all-extras
     ```
 
@@ -410,13 +410,13 @@ It's possible to install from source using pip if you first install the build de
 > Adjust the Python version and architecture in the `LD_LIBRARY_PATH` to match your system.
 > Use `uv python list` to find the exact path for your Python installation.
 
-See the [Installation Guide](https://nautilustrader.io/docs/latest/getting_started/installation) for other options and further details.
+See the [Installation Guide](https://Nicetrader.io/docs/latest/getting_started/installation) for other options and further details.
 
 ## Redis
 
-Using [Redis](https://redis.io) with NautilusTrader is **optional** and only required if configured as the backend for a
-[cache](https://nautilustrader.io/docs/latest/concepts/cache) database or [message bus](https://nautilustrader.io/docs/latest/concepts/message_bus).
-See the **Redis** section of the [Installation Guide](https://nautilustrader.io/docs/latest/getting_started/installation#redis) for further details.
+Using [Redis](https://redis.io) with NiceTrader is **optional** and only required if configured as the backend for a
+[cache](https://Nicetrader.io/docs/latest/concepts/cache) database or [message bus](https://Nicetrader.io/docs/latest/concepts/message_bus).
+See the **Redis** section of the [Installation Guide](https://Nicetrader.io/docs/latest/getting_started/installation#redis) for further details.
 
 ## Makefile
 
@@ -444,24 +444,24 @@ A `Makefile` is provided to automate most installation and build tasks for devel
 
 > [!TIP]
 >
-> See the [crates/infrastructure/TESTS.md](https://github.com/nautechsystems/nautilus_trader/blob/develop/crates/infrastructure/TESTS.md) file for running the infrastructure integration tests.
+> See the [crates/infrastructure/TESTS.md](https://github.com/nautechsystems/Nice_trader/blob/develop/crates/infrastructure/TESTS.md) file for running the infrastructure integration tests.
 
 ## Examples
 
 Indicators and strategies can be developed in both Python and Cython. For performance and
 latency-sensitive applications, we recommend using Cython. Below are some examples:
 
-- [indicator](/nautilus_trader/examples/indicators/ema_python.py) example written in Python.
-- [indicator](/nautilus_trader/indicators/) examples written in Cython.
-- [strategy](/nautilus_trader/examples/strategies/) examples written in Python.
+- [indicator](/Nice_trader/examples/indicators/ema_python.py) example written in Python.
+- [indicator](/Nice_trader/indicators/) examples written in Cython.
+- [strategy](/Nice_trader/examples/strategies/) examples written in Python.
 - [backtest](/examples/backtest/) examples using a `BacktestEngine` directly.
 
 ## Docker
 
 Docker containers are built using the base image `python:3.12-slim` with the following variant tags:
 
-- `nautilus_trader:latest` has the latest release version installed.
-- `nautilus_trader:nightly` has the head of the `nightly` branch installed.
+- `Nice_trader:latest` has the latest release version installed.
+- `Nice_trader:nightly` has the head of the `nightly` branch installed.
 - `jupyterlab:latest` has the latest release version installed along with `jupyterlab` and an
   example backtest notebook with accompanying data.
 - `jupyterlab:nightly` has the head of the `nightly` branch installed along with `jupyterlab` and an
@@ -488,11 +488,11 @@ http://127.0.0.1:8888/lab
 
 > [!WARNING]
 >
-> NautilusTrader currently exceeds the rate limit for Jupyter notebook logging (stdout output).
+> NiceTrader currently exceeds the rate limit for Jupyter notebook logging (stdout output).
 > Therefore, we set the `log_level` to `ERROR` in the examples. Lowering this level to see more
 > logging will cause the notebook to hang during cell execution. We are investigating a fix that
 > may involve either raising the configured rate limits for Jupyter or throttling the log flushing
-> from Nautilus.
+> from Nice.
 >
 > - <https://github.com/jupyterlab/jupyterlab/issues/12845>
 > - <https://github.com/deshaw/jupyterlab-limit-output>
@@ -500,7 +500,7 @@ http://127.0.0.1:8888/lab
 ## Development
 
 We aim to provide the most pleasant developer experience possible for this hybrid codebase of Python, Cython and Rust.
-See the [Developer Guide](https://nautilustrader.io/docs/latest/developer_guide/index.html) for helpful information.
+See the [Developer Guide](https://Nicetrader.io/docs/latest/developer_guide/index.html) for helpful information.
 
 > [!TIP]
 >
@@ -508,7 +508,7 @@ See the [Developer Guide](https://nautilustrader.io/docs/latest/developer_guide/
 
 ### Testing with Rust
 
-[cargo-nextest](https://nexte.st) is the standard Rust test runner for NautilusTrader.
+[cargo-nextest](https://nexte.st) is the standard Rust test runner for NiceTrader.
 Its key benefit is isolating each test in its own process, ensuring test reliability
 by avoiding interference.
 
@@ -524,50 +524,50 @@ cargo install cargo-nextest
 
 ## Contributing
 
-Thank you for considering contributing to NautilusTrader! We welcome any and all help to improve
-the project. If you have an idea for an enhancement or a bug fix, the first step is to open an [issue](https://github.com/nautechsystems/nautilus_trader/issues)
+Thank you for considering contributing to NiceTrader! We welcome any and all help to improve
+the project. If you have an idea for an enhancement or a bug fix, the first step is to open an [issue](https://github.com/nautechsystems/Nice_trader/issues)
 on GitHub to discuss it with the team. This helps to ensure that your contribution will be
 well-aligned with the goals of the project and avoids duplication of effort.
 
 Before getting started, be sure to review the [open-source scope](/ROADMAP.md#open-source-scope) outlined in the project’s roadmap to understand what’s in and out of scope.
 
 Once you're ready to start working on your contribution, make sure to follow the guidelines
-outlined in the [CONTRIBUTING.md](https://github.com/nautechsystems/nautilus_trader/blob/develop/CONTRIBUTING.md) file. This includes signing a Contributor License Agreement (CLA)
+outlined in the [CONTRIBUTING.md](https://github.com/nautechsystems/Nice_trader/blob/develop/CONTRIBUTING.md) file. This includes signing a Contributor License Agreement (CLA)
 to ensure that your contributions can be included in the project.
 
 > [!NOTE]
 >
 > Pull requests should target the `develop` branch (the default branch). This is where new features and improvements are integrated before release.
 
-Thank you again for your interest in NautilusTrader! We look forward to reviewing your contributions and working with you to improve the project.
+Thank you again for your interest in NiceTrader! We look forward to reviewing your contributions and working with you to improve the project.
 
 ## Community
 
-Join our community of users and contributors on [Discord](https://discord.gg/NautilusTrader) to chat
-and stay up-to-date with the latest announcements and features of NautilusTrader. Whether you're a
+Join our community of users and contributors on [Discord](https://discord.gg/NiceTrader) to chat
+and stay up-to-date with the latest announcements and features of NiceTrader. Whether you're a
 developer looking to contribute or just want to learn more about the platform, all are welcome on our Discord server.
 
 > [!WARNING]
 >
-> NautilusTrader does not issue, promote, or endorse any cryptocurrency tokens. Any claims or communications suggesting otherwise are unauthorized and false.
+> NiceTrader does not issue, promote, or endorse any cryptocurrency tokens. Any claims or communications suggesting otherwise are unauthorized and false.
 >
-> All official updates and communications from NautilusTrader will be shared exclusively through <https://nautilustrader.io>, our [Discord server](https://discord.gg/NautilusTrader),
-> or our X (Twitter) account: [@NautilusTrader](https://x.com/NautilusTrader).
+> All official updates and communications from NiceTrader will be shared exclusively through <https://Nicetrader.io>, our [Discord server](https://discord.gg/NiceTrader),
+> or our X (Twitter) account: [@NiceTrader](https://x.com/NiceTrader).
 >
 > If you encounter any suspicious activity, please report it to the appropriate platform and contact us at <info@nautechsystems.io>.
 
 ## License
 
-The source code for NautilusTrader is available on GitHub under the [GNU Lesser General Public License v3.0](https://www.gnu.org/licenses/lgpl-3.0.en.html).
-Contributions to the project are welcome and require the completion of a standard [Contributor License Agreement (CLA)](https://github.com/nautechsystems/nautilus_trader/blob/develop/CLA.md).
+The source code for NiceTrader is available on GitHub under the [GNU Lesser General Public License v3.0](https://www.gnu.org/licenses/lgpl-3.0.en.html).
+Contributions to the project are welcome and require the completion of a standard [Contributor License Agreement (CLA)](https://github.com/nautechsystems/Nice_trader/blob/develop/CLA.md).
 
 ---
 
-NautilusTrader™ is developed and maintained by Nautech Systems, a technology
+NiceTrader™ is developed and maintained by Nautech Systems, a technology
 company specializing in the development of high-performance trading systems.
-For more information, visit <https://nautilustrader.io>.
+For more information, visit <https://Nicetrader.io>.
 
 © 2015-2025 Nautech Systems Pty Ltd. All rights reserved.
 
-![nautechsystems](https://github.com/nautechsystems/nautilus_trader/raw/develop/assets/ns-logo.png "nautechsystems")
-<img src="https://github.com/nautechsystems/nautilus_trader/raw/develop/assets/ferris.png" width="128">
+![nautechsystems](https://github.com/nautechsystems/Nice_trader/raw/develop/assets/ns-logo.png "nautechsystems")
+<img src="https://github.com/nautechsystems/Nice_trader/raw/develop/assets/ferris.png" width="128">

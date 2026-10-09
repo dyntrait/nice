@@ -1,0 +1,103 @@
+[package]
+name = "nice-persistence"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Data persistence and storage for the nice trading engine"
+categories.workspace = true
+keywords.workspace = true
+documentation.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "nice_persistence"
+crate-type = ["rlib"]
+
+[features]
+default = []
+defi = ["nice-model/defi"]
+cloud = [
+  "object_store/aws",
+  "object_store/azure",
+  "object_store/gcp",
+  "object_store/http",
+]
+
+
+high-precision = [
+  "nice-model/high-precision",
+  "nice-testkit/high-precision",
+  "nice-serialization/high-precision",
+]
+
+[package.metadata.docs.rs]
+# Python docs depend on the local pyo3-stub-gen patch for now, which published crates do not carry
+features = ["cloud", "defi", "high-precision"]
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+nice-common = { workspace = true, features = ["live"] }
+nice-core = { workspace = true }
+nice-model = { workspace = true }
+nice-persistence-macros = { workspace = true }
+nice-serialization = { workspace = true, features = ["arrow"] }
+
+ahash = { workspace = true }
+anyhow = { workspace = true }
+arrow = { workspace = true }
+arrow-row = { workspace = true }
+datafusion = { workspace = true }
+futures = { workspace = true }
+indexmap = { workspace = true }
+jiff = { workspace = true }
+log = { workspace = true }
+object_store = { workspace = true }
+parking_lot = { workspace = true }
+parquet = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+unbounded-interval-tree = { workspace = true }
+url = { workspace = true }
+
+pyo3 = { workspace = true, optional = true }
+pyo3-stub-gen = { workspace = true, optional = true }
+
+[dev-dependencies]
+nice-model = { workspace = true, features = ["test-support"] }
+nice-testkit = { workspace = true, default-features = false, features = [
+  "datasets",
+] }
+
+criterion = { workspace = true }
+pretty_assertions = { workspace = true }
+proptest = { workspace = true }
+rstest = { workspace = true }
+rust_decimal = { workspace = true }
+tempfile = { workspace = true }
+
+[[bench]]
+name = "persistence"
+path = "benches/persistence.rs"
+harness = false
+
+[[bin]]
+name = "to-json"
+path = "bin/to_json.rs"
+required-features = ["python"]
+doc = false
+test = false
+
+[[bin]]
+name = "to-parquet"
+path = "bin/to_parquet.rs"
+required-features = ["python"]
+doc = false
+test = false

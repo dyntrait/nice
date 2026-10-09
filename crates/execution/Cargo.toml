@@ -1,0 +1,76 @@
+[package]
+name = "nice-execution"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Core execution machinery for the nice trading engine"
+categories.workspace = true
+keywords.workspace = true
+documentation.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "nice_execution"
+crate-type = ["rlib"]
+
+[features]
+default = []
+
+simulation = ["dep:madsim", "nice-core/simulation"]
+high-precision = ["nice-model/high-precision"]
+
+[package.metadata.docs.rs]
+# Python docs depend on the local pyo3-stub-gen patch for now, which published crates do not carry
+features = ["high-precision", "simulation"]
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+nice-common = { workspace = true }
+nice-core = { workspace = true }
+nice-model = { workspace = true }
+
+ahash = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+bon = { workspace = true }
+futures = { workspace = true }
+indexmap = { workspace = true }
+jiff = { workspace = true }
+log = { workspace = true }
+rand = { workspace = true }
+rust_decimal = { workspace = true }
+rust_decimal_macros = { workspace = true }
+serde = { workspace = true }
+smallvec = { workspace = true }
+ustr = { workspace = true }
+uuid = { workspace = true }
+
+madsim = { workspace = true, optional = true }
+pyo3 = { workspace = true, optional = true }
+pyo3-stub-gen = { workspace = true, optional = true }
+
+[dev-dependencies]
+nice-model = { workspace = true, features = ["test-support"] }
+
+bytes = { workspace = true }
+criterion = { workspace = true }
+parking_lot = { workspace = true }
+proptest = { workspace = true }
+rstest = { workspace = true }
+serde_json = { workspace = true }
+
+[[bench]]
+name = "matching_core"
+path = "benches/matching_core.rs"
+harness = false
+
+[[bench]]
+name = "matching_engine"
+path = "benches/matching_engine.rs"
+harness = false

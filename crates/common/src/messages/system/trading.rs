@@ -1,14 +1,3 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : trading.rs.rs
-//  @Author       : dyntrait Created On 2026/1/5 16:13
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
 
 use std::{
     any::Any,
@@ -16,8 +5,8 @@ use std::{
 };
 
 use indexmap::IndexMap;
-use nautilus_core::{UUID4, UnixNanos};
-use nautilus_model::{enums::TradingState, identifiers::TraderId};
+use nice_core::{UUID4, UnixNanos};
+use nice_model::{enums::TradingState, identifiers::TraderId};
 use serde::{Deserialize, Serialize};
 
 /// Represents an event where trading state has changed at the `RiskEngine`.
@@ -26,7 +15,7 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type")]
 #[cfg_attr(
     feature = "python",
-    pyo3::pyclass(module = "nautilus_trader.core.nautilus_pyo3.model")
+    pyo3::pyclass(module = "nice_trader.model", from_py_object)
 )]
 pub struct TradingStateChanged {
     /// The trader ID associated with the event.

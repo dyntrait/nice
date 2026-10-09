@@ -1,0 +1,32 @@
+[package]
+name = "nice-trader"
+rust-version.workspace = true
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Container crate for core niceTrader APIs"
+categories.workspace = true
+keywords.workspace = true
+documentation.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+path = "lib.rs"
+
+[features]
+default = []
+test-support = ["nice-model/test-support"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+nice-common = { workspace = true }
+nice-core = { workspace = true }
+nice-model = { workspace = true }

@@ -1,24 +1,15 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2025  dyntrait  All rights reserved.
-//  All Rights Reserved
-//
-//  @File         : symbol.rs
-//  @Author       : dyntrait
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 //! Represents a valid ticker symbol ID for a tradable instrument.
 
 use std::{
-    fmt::{Debug, Display, Formatter},
+    fmt::{Debug, Display},
     hash::Hash,
 };
 
-use nice_core::correctness::{FAILED, check_valid_string_utf8};
+use nice_core::correctness::{
+    CorrectnessResult, CorrectnessResultExt, FAILED, check_valid_string_utf8,
+};
 use ustr::Ustr;
 
 /// Represents a valid ticker symbol ID for a tradable instrument.
@@ -36,7 +27,7 @@ impl Symbol {
     /// # Notes
     ///
     /// PyO3 requires a `Result` type for proper error handling and stacktrace printing in Python.
-    pub fn new_checked<T: AsRef<str>>(value: T) -> anyhow::Result<Self> {
+    pub fn new_checked<T: AsRef<str>>(value: T) -> CorrectnessResult<Self> {
         let value = value.as_ref();
         check_valid_string_utf8(value, stringify!(value))?;
         Ok(Self(Ustr::from(value)))
@@ -48,11 +39,12 @@ impl Symbol {
     ///
     /// Panics if `value` is not a valid string.
     pub fn new<T: AsRef<str>>(value: T) -> Self {
-        Self::new_checked(value).expect(FAILED)
+        Self::new_checked(value).expect_display(FAILED)
     }
 
     /// Sets the inner identifier value.
-    pub fn set_inner(&mut self, value: &str) {
+    #[cfg_attr(not(feature = "python"), allow(dead_code))]
+    pub(crate) fn set_inner(&mut self, value: &str) {
         self.0 = Ustr::from(value);
     }
 
@@ -116,13 +108,13 @@ impl Symbol {
 }
 
 impl Debug for Symbol {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.0)
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "\"{}\"", self.0)
     }
 }
 
 impl Display for Symbol {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
@@ -135,6 +127,7 @@ impl From<Ustr> for Symbol {
 
 #[cfg(test)]
 mod tests {
+    use nice_core::correctness::CorrectnessError;
     use rstest::rstest;
 
     use crate::identifiers::{Symbol, stubs::*};
@@ -179,9 +172,55 @@ mod tests {
     }
 
     #[rstest]
-    #[case("")] // Empty string
-    #[case("   ")] // Whitespace only
-    fn test_symbol_with_invalid_values(#[case] input: &str) {
-        assert!(Symbol::new_checked(input).is_err());
+    fn test_symbol_new_checked_rejects_whitespace_only() {
+        assert!(Symbol::new_checked("   ").is_err());
+    }
+
+    #[rstest]
+    fn test_symbol_new_checked_returns_typed_error_with_stable_display() {
+        let error = Symbol::new_checked("").unwrap_err();
+
+        assert_eq!(
+            error,
+            CorrectnessError::EmptyString {
+                param: "value".to_string(),
+            }
+        );
+        assert_eq!(error.to_string(), "invalid string for 'value', was empty");
+    }
+
+    #[rstest]
+    #[should_panic(expected = "Condition failed: invalid string for 'value', was empty")]
+    fn test_symbol_new_with_empty_string_panics_with_display_format() {
+        let _ = Symbol::new("");
+    }
+
+    #[rstest]
+    fn test_symbol_deserialize_json_with_unicode_escapes() {
+        let symbol: Symbol = serde_json::from_str(r#""\u9f99\u867eUSDT""#).unwrap();
+        assert_eq!(symbol.as_str(), "\u{9f99}\u{867e}USDT");
+    }
+
+    #[rstest]
+    fn test_symbol_deserialize_from_owned_value_with_non_ascii() {
+        let value = serde_json::Value::String("\u{9f99}\u{867e}USDT".to_string());
+        let symbol: Symbol = serde_json::from_value(value).unwrap();
+        assert_eq!(symbol.as_str(), "\u{9f99}\u{867e}USDT");
+    }
+
+    #[rstest]
+    fn test_symbol_serialization_roundtrip_non_ascii() {
+        let symbol = Symbol::new("\u{9f99}\u{867e}USDT");
+        let json = serde_json::to_string(&symbol).unwrap();
+        assert_eq!(json, "\"\u{9f99}\u{867e}USDT\"");
+
+        let deserialized: Symbol = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, symbol);
+    }
+
+    #[rstest]
+    fn test_symbol_deserialize_rejects_empty_string() {
+        let result: Result<Symbol, _> = serde_json::from_str(r#""""#);
+        assert!(result.is_err());
     }
 }

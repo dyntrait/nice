@@ -1,27 +1,43 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : any.rs
-//  @Author       : dyntrait Created On 2026/1/5 14:02
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 use std::fmt::Display;
 
 use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use super::{
-    Order, limit::LimitOrder, limit_if_touched::LimitIfTouchedOrder, market::MarketOrder,
-    market_if_touched::MarketIfTouchedOrder, market_to_limit::MarketToLimitOrder,
-    stop_limit::StopLimitOrder, stop_market::StopMarketOrder,
+    Order, OrderCore, OrderError, limit::LimitOrder, limit_if_touched::LimitIfTouchedOrder,
+    market::MarketOrder, market_if_touched::MarketIfTouchedOrder,
+    market_to_limit::MarketToLimitOrder, stop_limit::StopLimitOrder, stop_market::StopMarketOrder,
     trailing_stop_limit::TrailingStopLimitOrder, trailing_stop_market::TrailingStopMarketOrder,
 };
-use crate::{events::OrderEventAny, types::Price};
+use crate::{events::OrderEventAny, identifiers::OrderListId, types::Price};
+
+/// Error returned when [`OrderAny::from_events`] cannot replay order events.
+#[derive(Debug, Error)]
+pub enum OrderReplayError {
+    /// No events were supplied.
+    #[error("No order events provided to create OrderAny")]
+    EmptyInput,
+    /// The first event was not an initialization event.
+    #[error("First event must be `OrderInitialized`")]
+    WrongFirstEvent,
+    /// The initialization event could not be converted into an order.
+    #[error("Invalid `OrderInitialized` event: {source}")]
+    InvalidInitialization {
+        /// The source order conversion error.
+        #[source]
+        source: OrderError,
+    },
+    /// A later event could not be applied to the initialized order.
+    #[error("{source}")]
+    ApplyFailed {
+        /// The source event application error.
+        #[source]
+        source: OrderError,
+    },
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[enum_dispatch(Order)]
@@ -45,32 +61,28 @@ impl OrderAny {
     /// Returns an error if:
     /// - The `events` is empty.
     /// - The first event is not `OrderInitialized`.
-    /// - Any event has an invalid state transition when applied to the order.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `events` is empty (after the check, but before .unwrap()).
-    pub fn from_events(events: Vec<OrderEventAny>) -> anyhow::Result<Self> {
-        if events.is_empty() {
-            anyhow::bail!("No order events provided to create OrderAny");
+    /// - The initialization event violates an order invariant
+    ///   (e.g. missing required price/trigger fields, invalid quantity, invalid TIF/expire combo).
+    /// - Any subsequent event has an invalid state transition when applied to the order.
+    pub fn from_events(events: Vec<OrderEventAny>) -> Result<Self, OrderReplayError> {
+        let Some(init_event) = events.first() else {
+            return Err(OrderReplayError::EmptyInput);
+        };
+
+        let OrderEventAny::Initialized(init) = init_event else {
+            return Err(OrderReplayError::WrongFirstEvent);
+        };
+
+        let mut order = Self::try_from(init.clone())
+            .map_err(|source| OrderReplayError::InvalidInitialization { source })?;
+
+        for event in events.into_iter().skip(1) {
+            order
+                .apply(event)
+                .map_err(|source| OrderReplayError::ApplyFailed { source })?;
         }
 
-        // Pop the first event
-        let init_event = events.first().unwrap();
-        match init_event {
-            OrderEventAny::Initialized(init) => {
-                let mut order = Self::from(init.clone());
-                // Apply the rest of the events
-                for event in events.into_iter().skip(1) {
-                    // Apply event to order
-                    order.apply(event)?;
-                }
-                Ok(order)
-            }
-            _ => {
-                anyhow::bail!("First event must be `OrderInitialized`");
-            }
-        }
+        Ok(order)
     }
 
     /// Returns a reference to the [`crate::events::OrderInitialized`] event.
@@ -82,7 +94,6 @@ impl OrderAny {
     /// Panics if the first event is not `OrderInitialized` (violates invariant).
     #[must_use]
     pub fn init_event(&self) -> &crate::events::OrderInitialized {
-        // SAFETY: Order specification guarantees at least one event (OrderInitialized)
         match self
             .events()
             .first()
@@ -91,6 +102,36 @@ impl OrderAny {
             OrderEventAny::Initialized(init) => init,
             _ => panic!("Order invariant violated: first event must be OrderInitialized"),
         }
+    }
+
+    /// Assigns the order to the list identified by `id`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the order has no events or its first event is not `OrderInitialized`.
+    pub fn set_order_list_id(&mut self, id: OrderListId) {
+        let order: &mut OrderCore = match self {
+            Self::Limit(order) => order,
+            Self::LimitIfTouched(order) => order,
+            Self::Market(order) => order,
+            Self::MarketIfTouched(order) => order,
+            Self::MarketToLimit(order) => order,
+            Self::StopLimit(order) => order,
+            Self::StopMarket(order) => order,
+            Self::TrailingStopLimit(order) => order,
+            Self::TrailingStopMarket(order) => order,
+        };
+        let init = match order
+            .events
+            .first_mut()
+            .expect("Order invariant violated: no events")
+        {
+            OrderEventAny::Initialized(init) => init,
+            _ => panic!("Order invariant violated: first event must be OrderInitialized"),
+        };
+
+        order.order_list_id = Some(id);
+        init.order_list_id = Some(id);
     }
 }
 
@@ -254,14 +295,16 @@ impl LimitOrderAny {
     ///
     /// # Panics
     ///
-    /// Panics if the MarketToLimit order price is not set.
+    /// Panics if the `MarketToLimit` order price is not set.
     #[must_use]
     pub fn limit_px(&self) -> Price {
         match self {
             Self::Limit(order) => order.price,
             Self::MarketToLimit(order) => order.price.expect("MarketToLimit order price not set"),
             Self::StopLimit(order) => order.price,
-            Self::TrailingStopLimit(order) => order.price,
+            Self::TrailingStopLimit(order) => {
+                order.price.expect("TrailingStopLimit order price not set")
+            }
             Self::MarketOrderWithProtection(order) => {
                 order.protection_price.expect("No price for order")
             }
@@ -296,14 +339,14 @@ pub enum StopOrderAny {
 
 impl StopOrderAny {
     #[must_use]
-    pub fn stop_px(&self) -> Price {
+    pub fn stop_px(&self) -> Option<Price> {
         match self {
-            Self::LimitIfTouched(o) => o.trigger_price,
-            Self::MarketIfTouched(o) => o.trigger_price,
-            Self::StopLimit(o) => o.trigger_price,
-            Self::StopMarket(o) => o.trigger_price,
-            Self::TrailingStopLimit(o) => o.activation_price.unwrap_or(o.trigger_price),
-            Self::TrailingStopMarket(o) => o.activation_price.unwrap_or(o.trigger_price),
+            Self::LimitIfTouched(o) => Some(o.trigger_price),
+            Self::MarketIfTouched(o) => Some(o.trigger_price),
+            Self::StopLimit(o) => Some(o.trigger_price),
+            Self::StopMarket(o) => Some(o.trigger_price),
+            Self::TrailingStopLimit(o) => o.activation_price.or(o.trigger_price),
+            Self::TrailingStopMarket(o) => o.activation_price.or(o.trigger_price),
         }
     }
 }
@@ -324,16 +367,19 @@ impl PartialEq for StopOrderAny {
 
 #[cfg(test)]
 mod tests {
+    use nice_core::{UUID4, UnixNanos};
     use rstest::rstest;
     use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
 
     use super::*;
     use crate::{
-        enums::{OrderType, TrailingOffsetType},
-        events::{OrderEventAny, OrderUpdated, order::initialized::OrderInitializedBuilder},
+        enums::{OrderSide, OrderType, TrailingOffsetType, TriggerType},
+        events::{
+            OrderEventAny, OrderInitialized, OrderUpdated, order::spec::OrderInitializedSpec,
+        },
         identifiers::{ClientOrderId, InstrumentId, StrategyId},
-        orders::builder::OrderTestBuilder,
+        orders::{OrderError, builder::OrderTestBuilder},
         types::{Price, Quantity},
     };
 
@@ -362,12 +408,11 @@ mod tests {
     #[rstest]
     fn test_order_any_conversion_from_events() {
         // Create an OrderInitialized event
-        let init_event = OrderInitializedBuilder::default()
+        let init_event = OrderInitializedSpec::builder()
             .order_type(OrderType::Market)
             .instrument_id(InstrumentId::from("BTC-USDT.BINANCE"))
             .quantity(Quantity::from(10))
-            .build()
-            .unwrap();
+            .build();
 
         // Create a vector of events
         let events = vec![OrderEventAny::Initialized(init_event.clone())];
@@ -382,14 +427,365 @@ mod tests {
     }
 
     #[rstest]
+    #[case::limit(OrderType::Limit)]
+    #[case::limit_if_touched(OrderType::LimitIfTouched)]
+    #[case::market(OrderType::Market)]
+    #[case::market_if_touched(OrderType::MarketIfTouched)]
+    #[case::market_to_limit(OrderType::MarketToLimit)]
+    #[case::stop_limit(OrderType::StopLimit)]
+    #[case::stop_market(OrderType::StopMarket)]
+    #[case::trailing_stop_limit(OrderType::TrailingStopLimit)]
+    #[case::trailing_stop_market(OrderType::TrailingStopMarket)]
+    fn test_set_order_list_id_updates_init_event_and_replay(#[case] order_type: OrderType) {
+        let mut order = order_for_list_id_test(order_type);
+        let init_before = order.init_event().clone();
+        let event_count = order.event_count();
+        let order_list_id = OrderListId::from("OL-SET-LIST-001");
+
+        order.set_order_list_id(order_list_id);
+
+        let mut expected_init = init_before;
+        expected_init.order_list_id = Some(order_list_id);
+        assert_eq!(order.order_list_id(), Some(order_list_id));
+        assert_eq!(order.init_event(), &expected_init);
+        assert_eq!(order.event_count(), event_count);
+
+        let persisted_events: Vec<_> = order.events().into_iter().cloned().collect();
+        assert_eq!(
+            persisted_events,
+            vec![OrderEventAny::Initialized(expected_init.clone())]
+        );
+
+        let replayed = OrderAny::from_events(persisted_events).unwrap();
+        assert_eq!(replayed.order_list_id(), Some(order_list_id));
+        assert_eq!(replayed.init_event(), &expected_init);
+    }
+
+    fn order_for_list_id_test(order_type: OrderType) -> OrderAny {
+        OrderTestBuilder::new(order_type)
+            .instrument_id(InstrumentId::from("BTC-USDT.BINANCE"))
+            .client_order_id(ClientOrderId::from("ORDER-LIST-001"))
+            .quantity(Quantity::from(10))
+            .price(Price::from("101.00"))
+            .trigger_price(Price::from("100.00"))
+            .trigger_type(TriggerType::LastPrice)
+            .limit_offset(dec!(1))
+            .trailing_offset(dec!(1))
+            .trailing_offset_type(TrailingOffsetType::Price)
+            .init_id(UUID4::from("16578139-a945-4b65-b46c-bc131a15d8e7"))
+            .ts_init(UnixNanos::from(123_456_789))
+            .build()
+    }
+
+    #[rstest]
     fn test_order_any_from_events_empty_error() {
         let events: Vec<OrderEventAny> = vec![];
-        let result = OrderAny::from_events(events);
+        let err = OrderAny::from_events(events).expect_err("empty events should fail");
 
-        assert!(result.is_err());
+        assert!(matches!(err, OrderReplayError::EmptyInput));
         assert_eq!(
-            result.unwrap_err().to_string(),
+            err.to_string(),
             "No order events provided to create OrderAny"
+        );
+    }
+
+    #[rstest]
+    fn test_order_any_from_events_invalid_init_returns_error() {
+        // Limit order with `price = None` violates `LimitOrder` invariants. Previously this
+        // panicked inside `From<OrderInitialized>`; `from_events` must now surface it as `Err`.
+        let init_event = OrderInitializedSpec::builder()
+            .order_type(OrderType::Limit)
+            .instrument_id(InstrumentId::from("BTC-USDT.BINANCE"))
+            .quantity(Quantity::from(10))
+            .build();
+
+        let events = vec![OrderEventAny::Initialized(init_event)];
+        let err =
+            OrderAny::from_events(events).expect_err("invalid initialization should fail replay");
+
+        match &err {
+            OrderReplayError::InvalidInitialization { source } => {
+                assert_eq!(
+                    source.to_string(),
+                    "`price` is required for `LimitOrder` initialization",
+                );
+            }
+            _ => panic!("expected InvalidInitialization, was {err:?}"),
+        }
+        assert_eq!(
+            err.to_string(),
+            "Invalid `OrderInitialized` event: `price` is required for `LimitOrder` initialization",
+        );
+    }
+
+    #[rstest]
+    #[case::buy(
+        OrderSide::Buy,
+        Price::from("100.00"),
+        Price::from("101.00"),
+        "BUY Limit-If-Touched"
+    )]
+    #[case::sell(
+        OrderSide::Sell,
+        Price::from("100.00"),
+        Price::from("99.00"),
+        "SELL Limit-If-Touched"
+    )]
+    fn test_order_any_from_events_invalid_predicate_returns_error(
+        #[case] side: OrderSide,
+        #[case] price: Price,
+        #[case] trigger_price: Price,
+        #[case] expected_msg: &str,
+    ) {
+        // LimitIfTouched enforces `trigger_price <= price` for BUY and `trigger_price >= price`
+        // for SELL inside `new_checked`. Reconciliation must see violations as `Err` rather
+        // than panicking, on either side.
+        let init_event = OrderInitializedSpec::builder()
+            .order_type(OrderType::LimitIfTouched)
+            .order_side(side)
+            .instrument_id(InstrumentId::from("BTC-USDT.BINANCE"))
+            .quantity(Quantity::from(10))
+            .price(price)
+            .trigger_price(trigger_price)
+            .trigger_type(TriggerType::LastPrice)
+            .build();
+
+        let events = vec![OrderEventAny::Initialized(init_event)];
+        let err =
+            OrderAny::from_events(events).expect_err("invalid initialization should fail replay");
+
+        assert!(matches!(
+            err,
+            OrderReplayError::InvalidInitialization { .. }
+        ));
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Invalid `OrderInitialized` event") && msg.contains(expected_msg),
+            "unexpected error message: {msg}"
+        );
+    }
+
+    fn make_init_with_optional_fields(
+        order_type: OrderType,
+        price: Option<Price>,
+        trigger_price: Option<Price>,
+        trigger_type: Option<TriggerType>,
+        limit_offset: Option<Decimal>,
+        trailing_offset: Option<Decimal>,
+        trailing_offset_type: Option<TrailingOffsetType>,
+    ) -> OrderInitialized {
+        OrderInitializedSpec::builder()
+            .order_type(order_type)
+            .instrument_id(InstrumentId::from("BTC-USDT.BINANCE"))
+            .quantity(Quantity::from(10))
+            .maybe_price(price)
+            .maybe_trigger_price(trigger_price)
+            .maybe_trigger_type(trigger_type)
+            .maybe_limit_offset(limit_offset)
+            .maybe_trailing_offset(trailing_offset)
+            .maybe_trailing_offset_type(trailing_offset_type)
+            .build()
+    }
+
+    #[rstest]
+    #[case::lit_missing_price(
+        make_init_with_optional_fields(
+            OrderType::LimitIfTouched,
+            None,
+            Some(Price::from("100.00")),
+            Some(TriggerType::LastPrice),
+            None,
+            None,
+            None,
+        ),
+        "`price` is required for `LimitIfTouchedOrder`"
+    )]
+    #[case::lit_missing_trigger_price(
+        make_init_with_optional_fields(
+            OrderType::LimitIfTouched,
+            Some(Price::from("100.00")),
+            None,
+            Some(TriggerType::LastPrice),
+            None,
+            None,
+            None,
+        ),
+        "`trigger_price` is required for `LimitIfTouchedOrder`"
+    )]
+    #[case::lit_missing_trigger_type(
+        make_init_with_optional_fields(
+            OrderType::LimitIfTouched,
+            Some(Price::from("100.00")),
+            Some(Price::from("99.00")),
+            None,
+            None,
+            None,
+            None,
+        ),
+        "`trigger_type` is required for `LimitIfTouchedOrder`"
+    )]
+    #[case::stop_limit_missing_price(
+        make_init_with_optional_fields(
+            OrderType::StopLimit,
+            None,
+            Some(Price::from("100.00")),
+            Some(TriggerType::LastPrice),
+            None,
+            None,
+            None,
+        ),
+        "`price` is required for `StopLimitOrder`"
+    )]
+    #[case::stop_limit_missing_trigger_price(
+        make_init_with_optional_fields(
+            OrderType::StopLimit,
+            Some(Price::from("100.00")),
+            None,
+            Some(TriggerType::LastPrice),
+            None,
+            None,
+            None,
+        ),
+        "`trigger_price` is required for `StopLimitOrder`"
+    )]
+    #[case::stop_limit_missing_trigger_type(
+        make_init_with_optional_fields(
+            OrderType::StopLimit,
+            Some(Price::from("100.00")),
+            Some(Price::from("99.00")),
+            None,
+            None,
+            None,
+            None,
+        ),
+        "`trigger_type` is required for `StopLimitOrder`"
+    )]
+    #[case::stop_market_missing_trigger_price(
+        make_init_with_optional_fields(
+            OrderType::StopMarket,
+            None,
+            None,
+            Some(TriggerType::LastPrice),
+            None,
+            None,
+            None,
+        ),
+        "`trigger_price` is required for `StopMarketOrder`"
+    )]
+    #[case::stop_market_missing_trigger_type(
+        make_init_with_optional_fields(
+            OrderType::StopMarket,
+            None,
+            Some(Price::from("100.00")),
+            None,
+            None,
+            None,
+            None,
+        ),
+        "`trigger_type` is required for `StopMarketOrder`"
+    )]
+    #[case::mit_missing_trigger_price(
+        make_init_with_optional_fields(
+            OrderType::MarketIfTouched,
+            None,
+            None,
+            Some(TriggerType::LastPrice),
+            None,
+            None,
+            None,
+        ),
+        "`trigger_price` is required for `MarketIfTouchedOrder`"
+    )]
+    #[case::mit_missing_trigger_type(
+        make_init_with_optional_fields(
+            OrderType::MarketIfTouched,
+            None,
+            Some(Price::from("100.00")),
+            None,
+            None,
+            None,
+            None,
+        ),
+        "`trigger_type` is required for `MarketIfTouchedOrder`"
+    )]
+    #[case::tsl_missing_trigger_type(
+        make_init_with_optional_fields(
+            OrderType::TrailingStopLimit,
+            Some(Price::from("100.00")), Some(Price::from("99.00")), None,
+            Some(dec!(1)), Some(dec!(1)), Some(TrailingOffsetType::Price),
+        ),
+        "`trigger_type` is required for `TrailingStopLimitOrder`",
+    )]
+    #[case::tsl_missing_limit_offset(
+        make_init_with_optional_fields(
+            OrderType::TrailingStopLimit,
+            Some(Price::from("100.00")), Some(Price::from("99.00")), Some(TriggerType::LastPrice),
+            None, Some(dec!(1)), Some(TrailingOffsetType::Price),
+        ),
+        "`limit_offset` is required for `TrailingStopLimitOrder`",
+    )]
+    #[case::tsl_missing_trailing_offset(
+        make_init_with_optional_fields(
+            OrderType::TrailingStopLimit,
+            Some(Price::from("100.00")), Some(Price::from("99.00")), Some(TriggerType::LastPrice),
+            Some(dec!(1)), None, Some(TrailingOffsetType::Price),
+        ),
+        "`trailing_offset` is required for `TrailingStopLimitOrder`",
+    )]
+    #[case::tsl_missing_trailing_offset_type(
+        make_init_with_optional_fields(
+            OrderType::TrailingStopLimit,
+            Some(Price::from("100.00")), Some(Price::from("99.00")), Some(TriggerType::LastPrice),
+            Some(dec!(1)), Some(dec!(1)), None,
+        ),
+        "`trailing_offset_type` is required for `TrailingStopLimitOrder`",
+    )]
+    #[case::tsm_missing_trigger_type(
+        make_init_with_optional_fields(
+            OrderType::TrailingStopMarket,
+            None, Some(Price::from("100.00")), None,
+            None, Some(dec!(1)), Some(TrailingOffsetType::Price),
+        ),
+        "`trigger_type` is required for `TrailingStopMarketOrder`",
+    )]
+    #[case::tsm_missing_trailing_offset(
+        make_init_with_optional_fields(
+            OrderType::TrailingStopMarket,
+            None,
+            Some(Price::from("100.00")),
+            Some(TriggerType::LastPrice),
+            None,
+            None,
+            Some(TrailingOffsetType::Price),
+        ),
+        "`trailing_offset` is required for `TrailingStopMarketOrder`"
+    )]
+    #[case::tsm_missing_trailing_offset_type(
+        make_init_with_optional_fields(
+            OrderType::TrailingStopMarket,
+            None, Some(Price::from("100.00")), Some(TriggerType::LastPrice),
+            None, Some(dec!(1)), None,
+        ),
+        "`trailing_offset_type` is required for `TrailingStopMarketOrder`",
+    )]
+    fn test_order_any_from_events_missing_required_field_returns_error(
+        #[case] init: OrderInitialized,
+        #[case] expected_field_msg: &str,
+    ) {
+        // Each case omits exactly one required field for its order type. `from_events` must
+        // surface the per-type `TryFrom` error rather than panicking inside `OrderAny::from`.
+        let events = vec![OrderEventAny::Initialized(init)];
+        let err =
+            OrderAny::from_events(events).expect_err("invalid initialization should fail replay");
+
+        assert!(matches!(
+            err,
+            OrderReplayError::InvalidInitialization { .. }
+        ));
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Invalid `OrderInitialized` event") && msg.contains(expected_field_msg),
+            "unexpected error message: {msg}"
         );
     }
 
@@ -410,12 +806,33 @@ mod tests {
         let events = vec![OrderEventAny::Updated(update_event)];
 
         // Attempt to create order should fail
-        let result = OrderAny::from_events(events);
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            "First event must be `OrderInitialized`"
-        );
+        let err = OrderAny::from_events(events).expect_err("wrong first event should fail replay");
+        assert!(matches!(err, OrderReplayError::WrongFirstEvent));
+        assert_eq!(err.to_string(), "First event must be `OrderInitialized`");
+    }
+
+    #[rstest]
+    fn test_order_any_from_events_apply_failure() {
+        let init_event = OrderInitializedSpec::builder()
+            .order_type(OrderType::Market)
+            .instrument_id(InstrumentId::from("BTC-USDT.BINANCE"))
+            .quantity(Quantity::from(10))
+            .build();
+
+        let events = vec![
+            OrderEventAny::Initialized(init_event.clone()),
+            OrderEventAny::Initialized(init_event),
+        ];
+        let err =
+            OrderAny::from_events(events).expect_err("later invalid event should fail replay");
+
+        match &err {
+            OrderReplayError::ApplyFailed { source } => {
+                assert!(matches!(source, OrderError::AlreadyInitialized));
+            }
+            _ => panic!("expected ApplyFailed, was {err:?}"),
+        }
+        assert_eq!(err.to_string(), "Order was already initialized");
     }
 
     #[rstest]
@@ -504,7 +921,7 @@ mod tests {
 
         // Check stop price accessor
         let stop_px = stop_order_any.stop_px();
-        assert_eq!(stop_px, Price::new(100.0, 2));
+        assert_eq!(stop_px, Some(Price::new(100.0, 2)));
     }
 
     #[rstest]
@@ -515,7 +932,7 @@ mod tests {
             .quantity(Quantity::from(10))
             .trigger_price(Price::new(100.0, 2))
             .trailing_offset(Decimal::new(5, 1)) // 0.5
-            .trailing_offset_type(TrailingOffsetType::NoTrailingOffset)
+            .trailing_offset_type(TrailingOffsetType::Price)
             .build();
 
         // Convert to StopOrderAny
@@ -531,7 +948,7 @@ mod tests {
         assert_eq!(order_any.trailing_offset(), Some(dec!(0.5)));
         assert_eq!(
             order_any.trailing_offset_type(),
-            Some(TrailingOffsetType::NoTrailingOffset)
+            Some(TrailingOffsetType::Price)
         );
     }
 
@@ -545,7 +962,7 @@ mod tests {
             .trigger_price(Price::new(100.0, 2))
             .limit_offset(Decimal::new(10, 1)) // 1.0
             .trailing_offset(Decimal::new(5, 1)) // 0.5
-            .trailing_offset_type(TrailingOffsetType::NoTrailingOffset)
+            .trailing_offset_type(TrailingOffsetType::Price)
             .build();
 
         // Convert to LimitOrderAny

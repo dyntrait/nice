@@ -1,14 +1,4 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : swap.rs.rs
-//  @Author       : dyntrait Created On 2026/1/5 14:34
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 use std::fmt::Display;
 
@@ -36,6 +26,7 @@ pub struct RawSwapData {
 
 impl RawSwapData {
     /// Creates a new [`RawSwapData`] instance with the specified values.
+    #[must_use]
     pub fn new(amount0: I256, amount1: I256, sqrt_price_x96: U160) -> Self {
         Self {
             amount0,
@@ -51,10 +42,7 @@ impl RawSwapData {
 /// optionally includes computed market-oriented trade information. It serves as
 /// the primary data structure for tracking and analyzing DEX swap activity.
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nice_trader.core.nice_pyo3.model")
-)]
+
 pub struct PoolSwap {
     /// The blockchain network where the swap occurred.
     pub chain: SharedChain,
@@ -66,6 +54,8 @@ pub struct PoolSwap {
     pub pool_identifier: PoolIdentifier,
     /// The blockchain block number at which the swap was executed.
     pub block: u64,
+    /// The hash of the block observed when this swap was ingested.
+    pub block_hash: Option<String>,
     /// The unique hash identifier of the blockchain transaction containing the swap.
     pub transaction_hash: String,
     /// The index position of the transaction within the block.
@@ -86,10 +76,10 @@ pub struct PoolSwap {
     pub liquidity: u128,
     /// The current tick of the pool after the swap occurred.
     pub tick: i32,
-    /// UNIX timestamp (nanoseconds) when the swap occurred.
-    pub timestamp: Option<UnixNanos>,
+    /// UNIX timestamp (nanoseconds) when the swap event occurred.
+    pub ts_event: UnixNanos,
     /// UNIX timestamp (nanoseconds) when the instance was initialized.
-    pub ts_init: Option<UnixNanos>,
+    pub ts_init: UnixNanos,
     /// Optional computed trade information in market-oriented format.
     /// This translates raw blockchain data into standard trading terminology.
     pub trade_info: Option<SwapTradeInfo>,
@@ -98,7 +88,7 @@ pub struct PoolSwap {
 impl PoolSwap {
     /// Creates a new [`PoolSwap`] instance with the specified properties.
     #[must_use]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         chain: SharedChain,
         dex: SharedDex,
@@ -108,7 +98,8 @@ impl PoolSwap {
         transaction_hash: String,
         transaction_index: u32,
         log_index: u32,
-        timestamp: Option<UnixNanos>,
+        ts_event: UnixNanos,
+        ts_init: UnixNanos,
         sender: Address,
         recipient: Address,
         amount0: I256,
@@ -123,10 +114,12 @@ impl PoolSwap {
             instrument_id,
             pool_identifier,
             block,
+            block_hash: None,
             transaction_hash,
             transaction_index,
             log_index,
-            timestamp,
+            ts_event,
+            ts_init,
             sender,
             recipient,
             amount0,
@@ -134,7 +127,6 @@ impl PoolSwap {
             sqrt_price_x96,
             liquidity,
             tick,
-            ts_init: timestamp, // TODO: Use swap timestamp as init timestamp for now
             trade_info: None,
         }
     }
@@ -154,7 +146,6 @@ impl PoolSwap {
     /// # Errors
     ///
     /// Returns an error if the trade info computation or price calculations fail.
-    ///
     pub fn calculate_trade_info(
         &mut self,
         token0: &Token,

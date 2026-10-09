@@ -1,4 +1,43 @@
+
+
+//! Technical analysis indicators for [niceTrader](https://nicetrader.io).
+//!
+//! The `nice-indicators` crate provides a collection of technical analysis indicators
+//! for quantitative trading and market research. This includes a wide variety of indicators
+//! organized by category, with a unified trait-based architecture for consistent usage:
+//!
+//! - **Moving averages**: SMA, EMA, DEMA, HMA, WMA, VWAP, adaptive averages, linear regression,
+//!   and z-score.
+//! - **Momentum indicators**: RSI, MACD, Aroon, Bollinger Bands, CCI, Stochastics, and rate of change.
+//! - **Volatility indicators**: ATR, Donchian Channels, Keltner Channels, and volatility ratios.
+//! - **Ratio analysis**: Efficiency ratios and spread analysis for relative performance.
+//! - **Order book indicators**: Book imbalance ratio for analyzing market microstructure.
+//! - **Common indicator trait**: Unified interface supporting bars, quotes, trades, and order book data.
+//!
+//! All indicators are designed for high-performance real-time processing with bounded memory
+//! usage and efficient circular buffer implementations. The crate supports both Rust-native
+//! usage and Python integration for strategy development and backtesting.
+//!
+//! # niceTrader
+//!
+//! [niceTrader](https://nicetrader.io) is an open-source, production-grade, Rust-native
+//! engine for multi-asset, multi-venue trading systems.
+//!
+//! The system spans research, deterministic simulation, and live execution within a single
+//! event-driven architecture, providing research-to-live semantic parity.
+//!
+//! # Feature Flags
+//!
+//! This crate provides feature flags to control source code inclusion during compilation,
+//! depending on the intended use case, i.e. whether to provide Python bindings
+//! for the [nice_trader](https://pypi.org/project/nice_trader) Python package,
+//! or as part of a Rust only build.
+//!
+//! - `extension-module`: Builds as a Python extension module.
+//! - `python`: Enables Python bindings from [PyO3](https://pyo3.rs).
+
 #![warn(rustc::all)]
+#![warn(clippy::pedantic)]
 #![deny(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 #![deny(nonstandard_style)]
@@ -6,5 +45,43 @@
 #![deny(clippy::missing_errors_doc)]
 #![deny(clippy::missing_panics_doc)]
 #![deny(rustdoc::broken_intra_doc_links)]
+#![allow(
+    clippy::similar_names,
+    reason = "indicator fields such as period_d/period_k and value_d/value_k are intentionally parallel"
+)]
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    reason = "indicator math casts between usize/i64/f64 with values bounded by configured periods"
+)]
+#![allow(
+    clippy::assert_is_empty,
+    reason = "`assert!(x.is_empty())` is clearer than comparing against an empty value"
+)]
+// pyo3's `from_py_object` generates `.clone()` on `Copy` fields that clippy flags from the
+// macro expansion; an item-level `allow` cannot reach the expansion
+#![allow(clippy::clone_on_copy)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::float_cmp,
+        clippy::should_panic_without_expect,
+        clippy::unreadable_literal,
+        reason = "indicator tests assert exact float outputs and decimal constants from algorithm references"
+    )
+)]
 
+pub mod average;
+pub mod book;
 pub mod indicator;
+pub mod momentum;
+pub mod ratio;
+pub mod testing;
+pub mod volatility;
+
+#[cfg(test)]
+mod stubs;
+
+

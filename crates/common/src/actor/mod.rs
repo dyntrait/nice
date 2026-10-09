@@ -1,19 +1,7 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : mod.rs.rs
-//  @Author       : dyntrait Created On 2026/1/5 15:13
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
-
 
 //! Actor system for event-driven message processing.
 //!
-//! This module provides the actor framework used throughout NautilusTrader for handling
+//! This module provides the actor framework used throughout niceTrader for handling
 //! data processing, event management, and asynchronous message handling. Actors are
 //! lightweight components that process messages in isolation.
 
@@ -23,16 +11,17 @@ use std::{any::Any, fmt::Debug};
 
 use ustr::Ustr;
 
+#[doc(hidden)]
+pub mod binding;
 pub mod data_actor;
-#[cfg(feature = "indicators")]
-pub(crate) mod indicators;
+pub mod indicators;
 pub mod registry;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 // Re-exports
-pub use data_actor::{DataActor, DataActorConfig, DataActorCore};
+pub use data_actor::{DataActor, DataActorConfig, DataActorCore, DataActorNative};
 
 pub use crate::component::Component;
 

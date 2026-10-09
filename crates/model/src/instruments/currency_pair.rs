@@ -1,28 +1,18 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : currency_pair.rs
-//  @Author       : dyntrait Created On 2026/1/5 14:20
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 use std::hash::{Hash, Hasher};
 
 use nice_core::{
-    UnixNanos,
-    correctness::{FAILED, check_equal_u8},
+    Params, UnixNanos,
+    correctness::{CorrectnessResult, check_equal_u8},
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use ustr::Ustr;
 
-use super::{Instrument, any::InstrumentAny};
+use super::{Instrument, any::InstrumentAny, tick_scheme::check_tick_scheme};
 use crate::{
-    enums::{AssetClass, InstrumentClass, OptionKind},
+    enums::{AssetClass, CurrencyType, InstrumentClass, OptionKind},
     identifiers::{InstrumentId, Symbol},
     types::{
         currency::Currency,
@@ -36,11 +26,8 @@ use crate::{
 ///
 /// Can represent both Fiat FX and Cryptocurrency pairs.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nice_trader.core.nice_pyo3.model")
-)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+
 pub struct CurrencyPair {
     /// The instrument ID for the instrument.
     pub id: InstrumentId,
@@ -82,23 +69,20 @@ pub struct CurrencyPair {
     pub max_price: Option<Price>,
     /// The minimum allowable quoted price.
     pub min_price: Option<Price>,
+    /// The registered variable tick scheme name.
+    pub tick_scheme: Option<Ustr>,
+    /// Additional instrument metadata as a JSON-serializable dictionary.
+    pub info: Option<Params>,
     /// UNIX timestamp (nanoseconds) when the data event occurred.
     pub ts_event: UnixNanos,
     /// UNIX timestamp (nanoseconds) when the data object was initialized.
     pub ts_init: UnixNanos,
 }
 
+#[bon::bon]
 impl CurrencyPair {
-    /// Creates a new [`CurrencyPair`] instance with correctness checking.
-    ///
-    /// # Notes
-    ///
-    /// PyO3 requires a `Result` type for proper error handling and stacktrace printing in Python.
-    /// # Errors
-    ///
-    /// Returns an error if any input validation fails.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new_checked(
+    #[expect(clippy::too_many_arguments)]
+    fn new_checked(
         instrument_id: InstrumentId,
         raw_symbol: Symbol,
         base_currency: Currency,
@@ -119,9 +103,11 @@ impl CurrencyPair {
         margin_maint: Option<Decimal>,
         maker_fee: Option<Decimal>,
         taker_fee: Option<Decimal>,
+        tick_scheme: Option<Ustr>,
+        info: Option<Params>,
         ts_event: UnixNanos,
         ts_init: UnixNanos,
-    ) -> anyhow::Result<Self> {
+    ) -> CorrectnessResult<Self> {
         check_equal_u8(
             price_precision,
             price_increment.precision,
@@ -136,6 +122,15 @@ impl CurrencyPair {
         )?;
         check_positive_price(price_increment, stringify!(price_increment))?;
         check_positive_quantity(size_increment, stringify!(size_increment))?;
+        check_tick_scheme(tick_scheme)?;
+
+        if let Some(multiplier) = multiplier {
+            check_positive_quantity(multiplier, stringify!(multiplier))?;
+        }
+
+        if let Some(lot_size) = lot_size {
+            check_positive_quantity(lot_size, stringify!(lot_size))?;
+        }
 
         Ok(Self {
             id: instrument_id,
@@ -158,18 +153,23 @@ impl CurrencyPair {
             margin_maint: margin_maint.unwrap_or_default(),
             maker_fee: maker_fee.unwrap_or_default(),
             taker_fee: taker_fee.unwrap_or_default(),
+            tick_scheme,
+            info,
             ts_event,
             ts_init,
         })
     }
 
-    /// Creates a new [`CurrencyPair`] instance.
+    /// Returns a fluent builder for a [`CurrencyPair`] instance.
     ///
-    /// # Panics
+    /// Required fields are enforced at compile time; optional fields can be omitted and use the
+    /// same defaults as checked construction. The same correctness checks run on `build`.
     ///
-    /// Panics if any input parameter is invalid (see `new_checked`).
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    /// # Errors
+    ///
+    /// Returns an error if any input validation fails.
+    #[builder(start_fn = builder, finish_fn = build)]
+    pub fn build_checked(
         instrument_id: InstrumentId,
         raw_symbol: Symbol,
         base_currency: Currency,
@@ -190,9 +190,11 @@ impl CurrencyPair {
         margin_maint: Option<Decimal>,
         maker_fee: Option<Decimal>,
         taker_fee: Option<Decimal>,
+        tick_scheme: Option<Ustr>,
+        info: Option<Params>,
         ts_event: UnixNanos,
         ts_init: UnixNanos,
-    ) -> Self {
+    ) -> CorrectnessResult<Self> {
         Self::new_checked(
             instrument_id,
             raw_symbol,
@@ -214,10 +216,11 @@ impl CurrencyPair {
             margin_maint,
             maker_fee,
             taker_fee,
+            tick_scheme,
+            info,
             ts_event,
             ts_init,
         )
-            .expect(FAILED)
     }
 }
 
@@ -236,6 +239,9 @@ impl Hash for CurrencyPair {
 }
 
 impl Instrument for CurrencyPair {
+    fn tick_scheme(&self) -> Option<Ustr> {
+        self.tick_scheme
+    }
     fn into_any(self) -> InstrumentAny {
         InstrumentAny::CurrencyPair(self)
     }
@@ -249,7 +255,13 @@ impl Instrument for CurrencyPair {
     }
 
     fn asset_class(&self) -> AssetClass {
-        AssetClass::FX
+        if self.base_currency.currency_type == CurrencyType::Crypto
+            || self.quote_currency.currency_type == CurrencyType::Crypto
+        {
+            AssetClass::Cryptocurrency
+        } else {
+            AssetClass::FX
+        }
     }
 
     fn instrument_class(&self) -> InstrumentClass {
@@ -375,12 +387,175 @@ impl Instrument for CurrencyPair {
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
+    use rust_decimal_macros::dec;
 
-    use crate::instruments::{CurrencyPair, stubs::*};
+    use crate::{
+        enums::{AssetClass, InstrumentClass},
+        identifiers::{InstrumentId, Symbol},
+        instruments::{CurrencyPair, Instrument, stubs::*},
+        types::{Currency, Money, Price, Quantity},
+    };
 
     #[rstest]
-    fn test_equality(currency_pair_btcusdt: CurrencyPair) {
-        let cloned = currency_pair_btcusdt;
-        assert_eq!(currency_pair_btcusdt, cloned);
+    fn test_trait_accessors(currency_pair_btcusdt: CurrencyPair) {
+        assert_eq!(
+            currency_pair_btcusdt.id(),
+            InstrumentId::from("BTCUSDT.BINANCE")
+        );
+        assert_eq!(
+            currency_pair_btcusdt.asset_class(),
+            AssetClass::Cryptocurrency
+        );
+        assert_eq!(
+            currency_pair_btcusdt.instrument_class(),
+            InstrumentClass::Spot
+        );
+        assert_eq!(currency_pair_btcusdt.base_currency(), Some(Currency::BTC()));
+        assert_eq!(currency_pair_btcusdt.quote_currency(), Currency::USDT());
+        assert!(!currency_pair_btcusdt.is_inverse());
+        assert_eq!(currency_pair_btcusdt.price_precision(), 2);
+        assert_eq!(currency_pair_btcusdt.size_precision(), 6);
+        assert_eq!(currency_pair_btcusdt.price_increment(), Price::from("0.01"));
+        assert_eq!(
+            currency_pair_btcusdt.size_increment(),
+            Quantity::from("0.000001")
+        );
+    }
+
+    #[rstest]
+    fn test_new_checked_price_precision_mismatch() {
+        let result = CurrencyPair::new_checked(
+            InstrumentId::from("TEST.BINANCE"),
+            Symbol::from("TEST"),
+            Currency::BTC(),
+            Currency::USDT(),
+            4, // mismatch
+            6,
+            Price::from("0.01"),
+            Quantity::from("0.000001"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            0.into(),
+            0.into(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[rstest]
+    #[case::zero_multiplier(Some(Quantity::from("0")), None)]
+    #[case::zero_lot_size(None, Some(Quantity::from("0")))]
+    fn test_new_checked_rejects_non_positive_sizing(
+        #[case] multiplier: Option<Quantity>,
+        #[case] lot_size: Option<Quantity>,
+    ) {
+        let result = CurrencyPair::new_checked(
+            InstrumentId::from("TEST.BINANCE"),
+            Symbol::from("TEST"),
+            Currency::BTC(),
+            Currency::USDT(),
+            2,
+            6,
+            Price::from("0.01"),
+            Quantity::from("0.000001"),
+            multiplier,
+            lot_size,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            0.into(),
+            0.into(),
+        );
+        let error = result.unwrap_err();
+        assert!(error.to_string().contains("not positive"), "{error}");
+    }
+
+    #[rstest]
+    fn test_serialization_roundtrip(currency_pair_btcusdt: CurrencyPair) {
+        let json = serde_json::to_string(&currency_pair_btcusdt).unwrap();
+        let deserialized: CurrencyPair = serde_json::from_str(&json).unwrap();
+        assert_eq!(json, serde_json::to_string(&deserialized).unwrap());
+    }
+
+    #[rstest]
+    fn test_builder_matches_new_checked() {
+        let positional = CurrencyPair::new_checked(
+            InstrumentId::from("BTCUSDT.BINANCE"),
+            Symbol::from("BTCUSDT"),
+            Currency::BTC(),
+            Currency::USDT(),
+            2,
+            6,
+            Price::from("0.01"),
+            Quantity::from("0.000001"),
+            Some(Quantity::from("10")),
+            Some(Quantity::from("5")),
+            Some(Quantity::from("9000.0")),
+            Some(Quantity::from("0.000001")),
+            Some(Money::new(1_000_000.0, Currency::USDT())),
+            Some(Money::new(10.0, Currency::USDT())),
+            Some(Price::from("1000000.00")),
+            Some(Price::from("0.01")),
+            Some(dec!(0.01)),
+            Some(dec!(0.02)),
+            Some(dec!(0.0002)),
+            Some(dec!(0.0004)),
+            None,
+            None,
+            1.into(),
+            2.into(),
+        )
+        .unwrap();
+
+        let built = CurrencyPair::builder()
+            .instrument_id(InstrumentId::from("BTCUSDT.BINANCE"))
+            .raw_symbol(Symbol::from("BTCUSDT"))
+            .base_currency(Currency::BTC())
+            .quote_currency(Currency::USDT())
+            .price_precision(2)
+            .size_precision(6)
+            .price_increment(Price::from("0.01"))
+            .size_increment(Quantity::from("0.000001"))
+            .multiplier(Quantity::from("10"))
+            .lot_size(Quantity::from("5"))
+            .max_quantity(Quantity::from("9000.0"))
+            .min_quantity(Quantity::from("0.000001"))
+            .max_notional(Money::new(1_000_000.0, Currency::USDT()))
+            .min_notional(Money::new(10.0, Currency::USDT()))
+            .max_price(Price::from("1000000.00"))
+            .min_price(Price::from("0.01"))
+            .margin_init(dec!(0.01))
+            .margin_maint(dec!(0.02))
+            .maker_fee(dec!(0.0002))
+            .taker_fee(dec!(0.0004))
+            .ts_event(1.into())
+            .ts_init(2.into())
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            serde_json::to_value(&positional).unwrap(),
+            serde_json::to_value(&built).unwrap(),
+        );
     }
 }

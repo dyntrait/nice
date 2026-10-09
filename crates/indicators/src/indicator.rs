@@ -1,14 +1,5 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : indicator.rs.rs
-//  @Author       : dyntrait Created On 2026/1/5 15:29
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
+
 //! A common `Indicator` trait.
 
 use std::fmt::Debug;
@@ -44,8 +35,13 @@ pub trait Indicator {
         panic!("`handle_book_mbo` {IMPL_ERR} `{}`", self.name());
     }
 
-    fn handle_quote(&mut self, quote: &QuoteTick) {
-        panic!("`handle_quote_tick` {IMPL_ERR} `{}`", self.name());
+    /// Updates the indicator with the given quote tick.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configured price type cannot be extracted from the quote.
+    fn handle_quote(&mut self, quote: &QuoteTick) -> anyhow::Result<()> {
+        anyhow::bail!("`handle_quote_tick` {IMPL_ERR} `{}`", self.name());
     }
 
     fn handle_trade(&mut self, trade: &TradeTick) {

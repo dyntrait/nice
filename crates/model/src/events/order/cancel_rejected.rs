@@ -1,20 +1,8 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2026  dyntrait  All rights reserved.
-//  All Rights Reserved
-//
-//  @File         : cancel_rejected.rs
-//  @Author       : dyntrait
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 use std::fmt::{Debug, Display};
 
-use derive_builder::Builder;
-use nice_core::{UUID4, UnixNanos, serialization::from_bool_as_u8};
+use nice_core::{UUID4, UnixNanos};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use ustr::Ustr;
@@ -35,13 +23,8 @@ use crate::{
 /// Represents an event where a `CancelOrder` command has been rejected by the
 /// trading venue.
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Builder)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
-#[cfg_attr(any(test, feature = "stubs"), builder(default))]
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nice_trader.core.nice_pyo3.model")
-)]
 pub struct OrderCancelRejected {
     /// The trader ID associated with the event.
     pub trader_id: TraderId,
@@ -60,17 +43,20 @@ pub struct OrderCancelRejected {
     /// UNIX timestamp (nanoseconds) when the event was initialized.
     pub ts_init: UnixNanos,
     /// If the event was generated during reconciliation.
-    #[serde(deserialize_with = "from_bool_as_u8")]
-    pub reconciliation: u8, // TODO: Change to bool once Cython removed
+    pub reconciliation: bool,
     /// The venue order ID associated with the event.
     pub venue_order_id: Option<VenueOrderId>,
     /// The account ID associated with the event.
     pub account_id: Option<AccountId>,
+    /// The causation ID associated with the event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub causation_id: Option<UUID4>,
 }
 
 impl OrderCancelRejected {
     /// Creates a new [`OrderCancelRejected`] instance.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         trader_id: TraderId,
         strategy_id: StrategyId,
@@ -93,9 +79,10 @@ impl OrderCancelRejected {
             event_id,
             ts_event,
             ts_init,
-            reconciliation: u8::from(reconciliation),
+            reconciliation,
             venue_order_id,
             account_id,
+            causation_id: None,
         }
     }
 }
@@ -149,7 +136,7 @@ impl OrderEvent for OrderCancelRejected {
         self.event_id
     }
 
-    fn kind(&self) -> &str {
+    fn type_name(&self) -> &'static str {
         stringify!(OrderCancelRejected)
     }
 
@@ -214,7 +201,7 @@ impl OrderEvent for OrderCancelRejected {
     }
 
     fn reconciliation(&self) -> bool {
-        false
+        self.reconciliation
     }
 
     fn price(&self) -> Option<Price> {
@@ -226,6 +213,10 @@ impl OrderEvent for OrderCancelRejected {
     }
 
     fn last_qty(&self) -> Option<Quantity> {
+        None
+    }
+
+    fn activation_price(&self) -> Option<Price> {
         None
     }
 
@@ -312,6 +303,9 @@ impl OrderEvent for OrderCancelRejected {
     fn ts_init(&self) -> UnixNanos {
         self.ts_init
     }
+    fn causation_id(&self) -> Option<UUID4> {
+        self.causation_id
+    }
 }
 
 #[cfg(test)]
@@ -328,5 +322,13 @@ mod tests {
             display,
             "OrderCancelRejected(instrument_id=BTCUSDT.COINBASE, client_order_id=O-19700101-000000-001-001-1, venue_order_id=001, account_id=SIM-001, reason='ORDER_DOES_NOT_EXIST', ts_event=0)"
         );
+    }
+
+    #[rstest]
+    fn test_order_cancel_rejected_serialization() {
+        let original = OrderCancelRejected::default();
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: OrderCancelRejected = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, deserialized);
     }
 }

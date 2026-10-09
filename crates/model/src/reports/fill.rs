@@ -1,18 +1,9 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : fill.rs
-//  @Author       : dyntrait Created On 2026/1/5 14:29
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 use std::fmt::Display;
 
 use nice_core::{UUID4, UnixNanos};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -24,10 +15,6 @@ use crate::{
 /// Represents a fill report of a single order execution.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nice_trader.core.nice_pyo3.model")
-)]
 pub struct FillReport {
     /// The account ID associated with the position.
     pub account_id: AccountId,
@@ -47,6 +34,8 @@ pub struct FillReport {
     pub commission: Money,
     /// The liquidity side of the execution.
     pub liquidity_side: LiquiditySide,
+    /// The cumulative or chunk average execution price when provided by the venue.
+    pub avg_px: Option<Decimal>,
     /// The unique identifier for the event.
     pub report_id: UUID4,
     /// UNIX timestamp (nanoseconds) when the event occurred.
@@ -61,7 +50,7 @@ pub struct FillReport {
 
 impl FillReport {
     /// Creates a new [`FillReport`] instance with required fields.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
         account_id: AccountId,
@@ -89,6 +78,7 @@ impl FillReport {
             last_px,
             commission,
             liquidity_side,
+            avg_px: None,
             report_id: report_id.unwrap_or_default(),
             ts_event,
             ts_init,

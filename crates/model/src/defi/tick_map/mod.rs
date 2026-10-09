@@ -1,14 +1,3 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : mod.rs.rs
-//  @Author       : dyntrait Created On 2026/1/5 14:42
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
 
 
 use ahash::AHashMap;
@@ -45,13 +34,19 @@ pub struct TickMap {
 
 impl Default for TickMap {
     fn default() -> Self {
-        Self::new(0)
+        Self::new(1)
     }
 }
 
 impl TickMap {
     /// Creates a new [`TickMap`] with the specified tick spacing.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `tick_spacing` is zero.
+    #[must_use]
     pub fn new(tick_spacing: u32) -> Self {
+        assert!(tick_spacing > 0, "Tick spacing must be greater than zero");
         Self {
             ticks: AHashMap::new(),
             tick_bitmap: TickBitmap::new(tick_spacing),
@@ -61,6 +56,7 @@ impl TickMap {
     }
 
     /// Retrieves a reference to the tick data at the specified tick index.
+    #[must_use]
     pub fn get_tick(&self, tick: i32) -> Option<&PoolTick> {
         self.ticks.get(&tick)
     }
@@ -124,7 +120,7 @@ impl TickMap {
         (fee_growth_inside_0, fee_growth_inside_1)
     }
 
-    /// Internal helper to update tick data and return flip status.
+    /// Updates tick data and returns its flip status.
     fn update_tick_data(
         &mut self,
         tick: i32,
@@ -246,12 +242,14 @@ impl TickMap {
     }
 
     /// Finds the next initialized tick after the given tick.
+    #[must_use]
     pub fn next_initialized_tick(&self, tick: i32, lte: bool) -> (i32, bool) {
         self.tick_bitmap
             .next_initialized_tick_within_one_word(tick, lte)
     }
 
     /// Checks if a tick is initialized in the bitmap.
+    #[must_use]
     pub fn is_tick_initialized(&self, tick: i32) -> bool {
         self.tick_bitmap.is_initialized(tick)
     }

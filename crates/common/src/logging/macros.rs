@@ -1,14 +1,3 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2025 dyntrait. All rights reserved.
-//
-//  @File         : macros.rs
-//  @Author       : dyntrait
-//  @Description  :
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
 
 //! Colored logging macros for enhanced log output with automatic color mapping.
 
@@ -16,6 +5,8 @@
 ///
 /// # Usage
 /// ```rust
+/// use nice_common::{enums::LogColor, log_trace};
+///
 /// // Automatic color (normal)
 /// log_trace!("Processing tick data");
 ///
@@ -26,49 +17,72 @@
 /// log_trace!("Processing data", component = "DataEngine");
 ///
 /// // Both color and component (flexible order)
-/// log_trace!("Data processed", color = LogColor::Cyan, component = "DataEngine");
-/// log_trace!("Data processed", component = "DataEngine", color = LogColor::Cyan);
+/// log_trace!(
+///     "Data processed",
+///     color = LogColor::Cyan,
+///     component = "DataEngine"
+/// );
+/// log_trace!(
+///     "Data processed",
+///     component = "DataEngine",
+///     color = LogColor::Cyan
+/// );
 /// ```
 #[macro_export]
 macro_rules! log_trace {
-    // Component only
-    ($msg:literal, component = $component:expr) => {
-        log::trace!(component = $component; $msg);
-    };
-    ($fmt:literal, $($args:expr),+, component = $component:expr) => {
-        log::trace!(component = $component; $fmt, $($args),+);
-    };
-
-    // Color only
-    ($msg:literal, color = $color:expr) => {
-        log::trace!(color = $color as u8; $msg);
-    };
-    ($fmt:literal, $($args:expr),+, color = $color:expr) => {
-        log::trace!(color = $color as u8; $fmt, $($args),+);
-    };
-
     // Both color and component (color first)
     ($msg:literal, color = $color:expr, component = $component:expr) => {
         log::trace!(component = $component, color = $color as u8; $msg);
     };
-    ($fmt:literal, $($args:expr),+, color = $color:expr, component = $component:expr) => {
-        log::trace!(component = $component, color = $color as u8; $fmt, $($args),+);
+    ($fmt:literal, $arg1:expr, color = $color:expr, component = $component:expr) => {
+        log::trace!(component = $component, color = $color as u8; $fmt, $arg1);
+    };
+    ($fmt:literal, $arg1:expr, $arg2:expr, color = $color:expr, component = $component:expr) => {
+        log::trace!(component = $component, color = $color as u8; $fmt, $arg1, $arg2);
     };
 
     // Both color and component (component first)
     ($msg:literal, component = $component:expr, color = $color:expr) => {
         log::trace!(component = $component, color = $color as u8; $msg);
     };
-    ($fmt:literal, $($args:expr),+, component = $component:expr, color = $color:expr) => {
-        log::trace!(component = $component, color = $color as u8; $fmt, $($args),+);
+    ($fmt:literal, $arg1:expr, component = $component:expr, color = $color:expr) => {
+        log::trace!(component = $component, color = $color as u8; $fmt, $arg1);
+    };
+    ($fmt:literal, $arg1:expr, $arg2:expr, component = $component:expr, color = $color:expr) => {
+        log::trace!(component = $component, color = $color as u8; $fmt, $arg1, $arg2);
     };
 
-    // Default (no color or component)
+    // Component only
+    ($msg:literal, component = $component:expr) => {
+        log::trace!(component = $component; $msg);
+    };
+    ($fmt:literal, $arg1:expr, component = $component:expr) => {
+        log::trace!(component = $component; $fmt, $arg1);
+    };
+    ($fmt:literal, $arg1:expr, $arg2:expr, component = $component:expr) => {
+        log::trace!(component = $component; $fmt, $arg1, $arg2);
+    };
+
+    // Color only
+    ($msg:literal, color = $color:expr) => {
+        log::trace!(color = $color as u8; $msg);
+    };
+    ($fmt:literal, $arg1:expr, color = $color:expr) => {
+        log::trace!(color = $color as u8; $fmt, $arg1);
+    };
+    ($fmt:literal, $arg1:expr, $arg2:expr, color = $color:expr) => {
+        log::trace!(color = $color as u8; $fmt, $arg1, $arg2);
+    };
+    ($fmt:literal, $arg1:expr, $arg2:expr, $arg3:expr, color = $color:expr) => {
+        log::trace!(color = $color as u8; $fmt, $arg1, $arg2, $arg3);
+    };
+
+    // Default (no color or component - auto-capture module path)
     ($msg:literal) => {
-        log::trace!(color = $crate::enums::LogColor::Normal as u8; $msg);
+        log::trace!(component = module_path!(), color = $crate::enums::LogColor::Normal as u8; $msg);
     };
     ($fmt:literal, $($args:expr),+) => {
-        log::trace!(color = $crate::enums::LogColor::Normal as u8; $fmt, $($args),+);
+        log::trace!(component = module_path!(), color = $crate::enums::LogColor::Normal as u8; $fmt, $($args),+);
     };
 }
 
@@ -76,6 +90,10 @@ macro_rules! log_trace {
 ///
 /// # Usage
 /// ```rust
+/// use nice_common::{enums::LogColor, log_debug};
+///
+/// let order_id = "O-19700101-000000-001-001-1";
+///
 /// // Automatic color (normal)
 /// log_debug!("Validating order: {}", order_id);
 ///
@@ -86,49 +104,72 @@ macro_rules! log_trace {
 /// log_debug!("Validating order", component = "RiskEngine");
 ///
 /// // Both color and component (flexible order)
-/// log_debug!("Order validated", color = LogColor::Blue, component = "RiskEngine");
-/// log_debug!("Order validated", component = "RiskEngine", color = LogColor::Blue);
+/// log_debug!(
+///     "Order validated",
+///     color = LogColor::Blue,
+///     component = "RiskEngine"
+/// );
+/// log_debug!(
+///     "Order validated",
+///     component = "RiskEngine",
+///     color = LogColor::Blue
+/// );
 /// ```
 #[macro_export]
 macro_rules! log_debug {
-    // Component only
-    ($msg:literal, component = $component:expr) => {
-        log::debug!(component = $component; $msg);
-    };
-    ($fmt:literal, $($args:expr),+, component = $component:expr) => {
-        log::debug!(component = $component; $fmt, $($args),+);
-    };
-
-    // Color only
-    ($msg:literal, color = $color:expr) => {
-        log::debug!(color = $color as u8; $msg);
-    };
-    ($fmt:literal, $($args:expr),+, color = $color:expr) => {
-        log::debug!(color = $color as u8; $fmt, $($args),+);
-    };
-
     // Both color and component (color first)
     ($msg:literal, color = $color:expr, component = $component:expr) => {
         log::debug!(component = $component, color = $color as u8; $msg);
     };
-    ($fmt:literal, $($args:expr),+, color = $color:expr, component = $component:expr) => {
-        log::debug!(component = $component, color = $color as u8; $fmt, $($args),+);
+    ($fmt:literal, $arg1:expr, color = $color:expr, component = $component:expr) => {
+        log::debug!(component = $component, color = $color as u8; $fmt, $arg1);
+    };
+    ($fmt:literal, $arg1:expr, $arg2:expr, color = $color:expr, component = $component:expr) => {
+        log::debug!(component = $component, color = $color as u8; $fmt, $arg1, $arg2);
     };
 
     // Both color and component (component first)
     ($msg:literal, component = $component:expr, color = $color:expr) => {
         log::debug!(component = $component, color = $color as u8; $msg);
     };
-    ($fmt:literal, $($args:expr),+, component = $component:expr, color = $color:expr) => {
-        log::debug!(component = $component, color = $color as u8; $fmt, $($args),+);
+    ($fmt:literal, $arg1:expr, component = $component:expr, color = $color:expr) => {
+        log::debug!(component = $component, color = $color as u8; $fmt, $arg1);
+    };
+    ($fmt:literal, $arg1:expr, $arg2:expr, component = $component:expr, color = $color:expr) => {
+        log::debug!(component = $component, color = $color as u8; $fmt, $arg1, $arg2);
     };
 
-    // Default (no color or component)
+    // Component only
+    ($msg:literal, component = $component:expr) => {
+        log::debug!(component = $component; $msg);
+    };
+    ($fmt:literal, $arg1:expr, component = $component:expr) => {
+        log::debug!(component = $component; $fmt, $arg1);
+    };
+    ($fmt:literal, $arg1:expr, $arg2:expr, component = $component:expr) => {
+        log::debug!(component = $component; $fmt, $arg1, $arg2);
+    };
+
+    // Color only
+    ($msg:literal, color = $color:expr) => {
+        log::debug!(color = $color as u8; $msg);
+    };
+    ($fmt:literal, $arg1:expr, color = $color:expr) => {
+        log::debug!(color = $color as u8; $fmt, $arg1);
+    };
+    ($fmt:literal, $arg1:expr, $arg2:expr, color = $color:expr) => {
+        log::debug!(color = $color as u8; $fmt, $arg1, $arg2);
+    };
+    ($fmt:literal, $arg1:expr, $arg2:expr, $arg3:expr, color = $color:expr) => {
+        log::debug!(color = $color as u8; $fmt, $arg1, $arg2, $arg3);
+    };
+
+    // Default (no color or component - auto-capture module path)
     ($msg:literal) => {
-        log::debug!(color = $crate::enums::LogColor::Normal as u8; $msg);
+        log::debug!(component = module_path!(), color = $crate::enums::LogColor::Normal as u8; $msg);
     };
     ($fmt:literal, $($args:expr),+) => {
-        log::debug!(color = $crate::enums::LogColor::Normal as u8; $fmt, $($args),+);
+        log::debug!(component = module_path!(), color = $crate::enums::LogColor::Normal as u8; $fmt, $($args),+);
     };
 }
 
@@ -136,18 +177,34 @@ macro_rules! log_debug {
 ///
 /// # Usage
 /// ```rust
+/// use nice_common::{enums::LogColor, log_info};
+///
+/// let order_id = "O-19700101-000000-001-001-1";
+///
 /// // Automatic color (normal)
 /// log_info!("Order {} filled successfully", order_id);
 ///
 /// // Custom color (e.g., green for success)
-/// log_info!("Order {} filled successfully", order_id, color = LogColor::Green);
+/// log_info!(
+///     "Order {} filled successfully",
+///     order_id,
+///     color = LogColor::Green
+/// );
 ///
 /// // Custom component
 /// log_info!("Processing order", component = "OrderManager");
 ///
 /// // Both color and component (flexible order)
-/// log_info!("Order filled", color = LogColor::Green, component = "OrderManager");
-/// log_info!("Order filled", component = "OrderManager", color = LogColor::Green);
+/// log_info!(
+///     "Order filled",
+///     color = LogColor::Green,
+///     component = "OrderManager"
+/// );
+/// log_info!(
+///     "Order filled",
+///     component = "OrderManager",
+///     color = LogColor::Green
+/// );
 /// ```
 #[macro_export]
 macro_rules! log_info {
@@ -198,12 +255,12 @@ macro_rules! log_info {
         log::info!(color = $color as u8; $fmt, $arg1, $arg2, $arg3);
     };
 
-    // Default (no color or component)
+    // Default (no color or component - auto-capture module path)
     ($msg:literal) => {
-        log::info!(color = $crate::enums::LogColor::Normal as u8; $msg);
+        log::info!(component = module_path!(), color = $crate::enums::LogColor::Normal as u8; $msg);
     };
     ($fmt:literal, $($args:expr),+) => {
-        log::info!(color = $crate::enums::LogColor::Normal as u8; $fmt, $($args),+);
+        log::info!(component = module_path!(), color = $crate::enums::LogColor::Normal as u8; $fmt, $($args),+);
     };
 }
 
@@ -211,6 +268,8 @@ macro_rules! log_info {
 ///
 /// # Usage
 /// ```rust
+/// use nice_common::{enums::LogColor, log_warn};
+///
 /// // Automatic color (yellow)
 /// log_warn!("Position size approaching limit");
 ///
@@ -221,8 +280,16 @@ macro_rules! log_info {
 /// log_warn!("Risk limit exceeded", component = "RiskEngine");
 ///
 /// // Both color and component (flexible order)
-/// log_warn!("Warning message", color = LogColor::Magenta, component = "RiskEngine");
-/// log_warn!("Warning message", component = "RiskEngine", color = LogColor::Magenta);
+/// log_warn!(
+///     "Warning message",
+///     color = LogColor::Magenta,
+///     component = "RiskEngine"
+/// );
+/// log_warn!(
+///     "Warning message",
+///     component = "RiskEngine",
+///     color = LogColor::Magenta
+/// );
 /// ```
 #[macro_export]
 macro_rules! log_warn {
@@ -273,12 +340,12 @@ macro_rules! log_warn {
         log::warn!(color = $color as u8; $fmt, $arg1, $arg2, $arg3);
     };
 
-    // Default (automatic yellow color, no component)
+    // Default (automatic yellow color, no component - auto-capture module path)
     ($msg:literal) => {
-        log::warn!(color = $crate::enums::LogColor::Yellow as u8; $msg);
+        log::warn!(component = module_path!(), color = $crate::enums::LogColor::Yellow as u8; $msg);
     };
     ($fmt:literal, $($args:expr),+) => {
-        log::warn!(color = $crate::enums::LogColor::Yellow as u8; $fmt, $($args),+);
+        log::warn!(component = module_path!(), color = $crate::enums::LogColor::Yellow as u8; $fmt, $($args),+);
     };
 }
 
@@ -286,6 +353,10 @@ macro_rules! log_warn {
 ///
 /// # Usage
 /// ```rust
+/// use nice_common::{enums::LogColor, log_error};
+///
+/// let error = "connection refused";
+///
 /// // Automatic color (red)
 /// log_error!("Failed to connect to exchange: {}", error);
 ///
@@ -296,8 +367,16 @@ macro_rules! log_warn {
 /// log_error!("Connection failed", component = "DataEngine");
 ///
 /// // Both color and component (flexible order)
-/// log_error!("Critical error", color = LogColor::Magenta, component = "DataEngine");
-/// log_error!("Critical error", component = "DataEngine", color = LogColor::Magenta);
+/// log_error!(
+///     "Critical error",
+///     color = LogColor::Magenta,
+///     component = "DataEngine"
+/// );
+/// log_error!(
+///     "Critical error",
+///     component = "DataEngine",
+///     color = LogColor::Magenta
+/// );
 /// ```
 #[macro_export]
 macro_rules! log_error {
@@ -348,12 +427,12 @@ macro_rules! log_error {
         log::error!(color = $color as u8; $fmt, $arg1, $arg2, $arg3);
     };
 
-    // Default (automatic red color, no component)
+    // Default (automatic red color, no component - auto-capture module path)
     ($msg:literal) => {
-        log::error!(color = $crate::enums::LogColor::Red as u8; $msg);
+        log::error!(component = module_path!(), color = $crate::enums::LogColor::Red as u8; $msg);
     };
     ($fmt:literal, $($args:expr),+) => {
-        log::error!(color = $crate::enums::LogColor::Red as u8; $fmt, $($args),+);
+        log::error!(component = module_path!(), color = $crate::enums::LogColor::Red as u8; $fmt, $($args),+);
     };
 }
 
@@ -364,7 +443,11 @@ pub use log_info;
 pub use log_trace;
 pub use log_warn;
 
-#[cfg(test)]
+// Gated out under `cfg(madsim)`: both tests drive the file-logging writer thread,
+// which is itself gated out under simulation (see `Logger::init_with_config`), so log
+// events are dropped and these tests would hang on `wait_until` waiting for a log file
+// that is never written. Logging is outside the determinism contract.
+#[cfg(all(test, not(all(feature = "simulation", madsim))))]
 mod tests {
     use std::{thread::sleep, time::Duration};
 
@@ -399,7 +482,7 @@ mod tests {
             config,
             file_config,
         )
-            .expect("Failed to initialize logger");
+        .expect("Failed to initialize logger");
 
         logging_clock_set_static_mode();
         logging_clock_set_static_time(1_650_000_000_000_000);
@@ -437,6 +520,16 @@ mod tests {
             "Color then component",
             color = LogColor::Cyan,
             component = "TestComponent"
+        );
+        log_trace!(
+            "Trace color then component",
+            color = LogColor::Cyan,
+            component = "TestComponent"
+        );
+        log_trace!(
+            "Trace component then color",
+            component = "TestComponent",
+            color = LogColor::Cyan
         );
 
         // Allow time for logs to be written
@@ -483,5 +576,83 @@ mod tests {
         assert!(log_contents.contains("Component test"));
         assert!(log_contents.contains("Component warning"));
         assert!(log_contents.contains("Color then component"));
+        assert!(log_contents.contains("Trace color then component"));
+        assert!(log_contents.contains("Trace component then color"));
+    }
+
+    #[rstest]
+    fn test_default_macro_captures_module_path() {
+        // This test verifies that log macros without explicit component
+        // auto-capture module_path!() as the component.
+        //
+        // The module path for this test is: nice_common::logging::macros::tests
+        // We configure a module filter and verify the log is filtered/passed accordingly.
+
+        let config = LoggerConfig::from_spec(
+            "stdout=Off;fileout=Trace;nice_common::logging::macros=Debug",
+        )
+        .unwrap();
+
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let file_config = FileWriterConfig {
+            directory: Some(temp_dir.path().to_str().unwrap().to_string()),
+            ..Default::default()
+        };
+
+        let log_guard = Logger::init_with_config(
+            TraderId::from("TRADER-PATH"),
+            UUID4::new(),
+            config,
+            file_config,
+        )
+        .expect("Failed to initialize logger");
+
+        logging_clock_set_static_mode();
+        logging_clock_set_static_time(1_650_000_000_000_000);
+
+        // Call macros WITHOUT explicit component - should auto-capture module_path!()
+        log_info!("Auto-captured module path message");
+        log_debug!("Debug level auto-captured");
+
+        // This trace should be filtered (module filter is Debug, Trace > Debug)
+        log_trace!("Trace should be filtered SHOULD_NOT_APPEAR");
+
+        sleep(Duration::from_millis(200));
+        drop(log_guard);
+
+        let mut log_contents = String::new();
+        wait_until(
+            || {
+                if let Some(log_file) = std::fs::read_dir(&temp_dir)
+                    .expect("Failed to read directory")
+                    .filter_map(Result::ok)
+                    .find(|entry| entry.path().is_file())
+                {
+                    log_contents =
+                        std::fs::read_to_string(log_file.path()).expect("Failed to read log file");
+                    !log_contents.is_empty()
+                } else {
+                    false
+                }
+            },
+            Duration::from_secs(3),
+        );
+
+        assert!(
+            log_contents.contains("nice_common::logging::macros"),
+            "Component should contain module path, was:\n{log_contents}"
+        );
+        assert!(
+            log_contents.contains("Auto-captured module path message"),
+            "Info message should pass"
+        );
+        assert!(
+            log_contents.contains("Debug level auto-captured"),
+            "Debug message should pass"
+        );
+        assert!(
+            !log_contents.contains("SHOULD_NOT_APPEAR"),
+            "Trace should be filtered by module filter"
+        );
     }
 }

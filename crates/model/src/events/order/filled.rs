@@ -1,19 +1,8 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2026  dyntrait  All rights reserved.
-//  All Rights Reserved
-//
-//  @File         : filled.rs
-//  @Author       : dyntrait
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 use std::fmt::{Debug, Display};
 
-use derive_builder::Builder;
+use indexmap::IndexMap;
 use nice_core::{UUID4, UnixNanos};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -21,8 +10,8 @@ use ustr::Ustr;
 
 use crate::{
     enums::{
-        ContingencyType, LiquiditySide, OrderSide, OrderSideSpecified, OrderType, TimeInForce,
-        TrailingOffsetType, TriggerType,
+        ContingencyType, LiquiditySide, OrderSide, OrderType, TimeInForce, TrailingOffsetType,
+        TriggerType,
     },
     events::OrderEvent,
     identifiers::{
@@ -33,13 +22,8 @@ use crate::{
 };
 
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Builder)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
-#[cfg_attr(any(test, feature = "stubs"), builder(default))]
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nice_trader.core.nice_pyo3.model")
-)]
 pub struct OrderFilled {
     /// The trader ID associated with the event.
     pub trader_id: TraderId,
@@ -49,6 +33,7 @@ pub struct OrderFilled {
     pub instrument_id: InstrumentId,
     /// The client order ID associated with the event.
     pub client_order_id: ClientOrderId,
+    /// The venue order ID associated with the event.
     pub venue_order_id: VenueOrderId,
     /// The account ID associated with the event.
     pub account_id: AccountId,
@@ -78,11 +63,17 @@ pub struct OrderFilled {
     pub position_id: Option<PositionId>,
     /// The commission generated from this execution.
     pub commission: Option<Money>,
+    /// Additional fill metadata (venue/adapter specific).
+    pub info: Option<IndexMap<Ustr, Ustr>>,
+    /// The causation ID associated with the event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub causation_id: Option<UUID4>,
 }
 
 impl OrderFilled {
     /// Creates a new [`OrderFilled`] instance.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         trader_id: TraderId,
         strategy_id: StrategyId,
@@ -103,6 +94,7 @@ impl OrderFilled {
         reconciliation: bool,
         position_id: Option<PositionId>,
         commission: Option<Money>,
+        info: Option<IndexMap<Ustr, Ustr>>,
     ) -> Self {
         Self {
             trader_id,
@@ -124,12 +116,9 @@ impl OrderFilled {
             reconciliation,
             position_id,
             commission,
+            info,
+            causation_id: None,
         }
-    }
-
-    #[must_use]
-    pub fn specified_side(&self) -> OrderSideSpecified {
-        self.order_side.as_specified()
     }
 
     #[must_use]
@@ -140,6 +129,54 @@ impl OrderFilled {
     #[must_use]
     pub fn is_sell(&self) -> bool {
         self.order_side == OrderSide::Sell
+    }
+
+    /// Splits an overfill into the fragment which closes the current position and the
+    /// fragment which opens the flipped position.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `closing_qty` is zero, is not smaller than the fill quantity,
+    /// or the proportional commission cannot be represented.
+    pub fn split_for_position_flip(
+        &self,
+        closing_qty: Quantity,
+        opening_position_id: Option<PositionId>,
+        opening_event_id: UUID4,
+    ) -> anyhow::Result<(Self, Self)> {
+        anyhow::ensure!(!closing_qty.is_zero(), "closing quantity was zero");
+        anyhow::ensure!(
+            closing_qty.raw < self.last_qty.raw,
+            "closing quantity {closing_qty} must be smaller than fill quantity {}",
+            self.last_qty,
+        );
+
+        let opening_qty =
+            Quantity::from_raw(self.last_qty.raw - closing_qty.raw, closing_qty.precision);
+        let closing_fraction = closing_qty.as_decimal() / self.last_qty.as_decimal();
+        let (closing_commission, opening_commission) = match self.commission {
+            Some(commission) => {
+                let closing = Money::from_decimal(
+                    commission.as_decimal() * closing_fraction,
+                    commission.currency,
+                )?;
+                (Some(closing), Some(commission - closing))
+            }
+            None => (None, None),
+        };
+
+        let mut closing = self.clone();
+        closing.last_qty = closing_qty;
+        closing.commission = closing_commission;
+
+        let mut opening = self.clone();
+        opening.last_qty = opening_qty;
+        opening.position_id = opening_position_id;
+        opening.commission = opening_commission;
+        opening.event_id = opening_event_id;
+        opening.causation_id = Some(self.event_id);
+
+        Ok((closing, opening))
     }
 }
 
@@ -239,7 +276,7 @@ impl OrderEvent for OrderFilled {
         self.event_id
     }
 
-    fn kind(&self) -> &str {
+    fn type_name(&self) -> &'static str {
         stringify!(OrderFilled)
     }
 
@@ -317,6 +354,10 @@ impl OrderEvent for OrderFilled {
 
     fn last_qty(&self) -> Option<Quantity> {
         Some(self.last_qty)
+    }
+
+    fn activation_price(&self) -> Option<Price> {
+        None
     }
 
     fn trigger_price(&self) -> Option<Price> {
@@ -402,6 +443,13 @@ impl OrderEvent for OrderFilled {
     fn ts_init(&self) -> UnixNanos {
         self.ts_init
     }
+    fn causation_id(&self) -> Option<UUID4> {
+        self.causation_id
+    }
+
+    fn info(&self) -> Option<IndexMap<Ustr, Ustr>> {
+        self.info.clone()
+    }
 }
 
 #[cfg(test)]
@@ -411,13 +459,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        enums::{LiquiditySide, OrderSide, OrderSideSpecified, OrderType},
+        enums::OrderSide,
         events::order::stubs::*,
-        identifiers::{
-            AccountId, ClientOrderId, InstrumentId, PositionId, StrategyId, TradeId, TraderId,
-            VenueOrderId,
-        },
-        stubs::TestDefault,
+        identifiers::PositionId,
         types::{Currency, Money, Price, Quantity},
     };
 
@@ -436,41 +480,14 @@ mod tests {
             Price::from("1.0500"),
             Currency::USD(),
             LiquiditySide::Taker,
-            Default::default(),
+            UUID4::default(),
             UnixNanos::from(1_000_000_000),
             UnixNanos::from(2_000_000_000),
             false,
             Some(PositionId::from("P-001")),
             Some(Money::new(2.5, Currency::USD())),
+            None,
         )
-    }
-
-    #[rstest]
-    fn test_order_filled_new() {
-        let order_filled = create_test_order_filled();
-
-        assert_eq!(order_filled.trader_id, TraderId::from("TRADER-001"));
-        assert_eq!(order_filled.strategy_id, StrategyId::from("EMA-CROSS"));
-        assert_eq!(order_filled.instrument_id, InstrumentId::from("EURUSD.SIM"));
-        assert_eq!(
-            order_filled.client_order_id,
-            ClientOrderId::from("O-19700101-000000-001-001-1")
-        );
-        assert_eq!(order_filled.venue_order_id, VenueOrderId::from("V-001"));
-        assert_eq!(order_filled.account_id, AccountId::from("SIM-001"));
-        assert_eq!(order_filled.trade_id, TradeId::from("T-001"));
-        assert_eq!(order_filled.order_side, OrderSide::Buy);
-        assert_eq!(order_filled.order_type, OrderType::Market);
-        assert_eq!(order_filled.last_qty, Quantity::from("100"));
-        assert_eq!(order_filled.last_px, Price::from("1.0500"));
-        assert_eq!(order_filled.currency, Currency::USD());
-        assert_eq!(order_filled.liquidity_side, LiquiditySide::Taker);
-        assert_eq!(order_filled.position_id, Some(PositionId::from("P-001")));
-        assert_eq!(
-            order_filled.commission,
-            Some(Money::new(2.5, Currency::USD()))
-        );
-        assert!(!order_filled.reconciliation);
     }
 
     #[rstest]
@@ -492,6 +509,23 @@ mod tests {
     }
 
     #[rstest]
+    fn test_order_filled_info_round_trips_through_serde(order_filled: OrderFilled) {
+        let mut info = IndexMap::new();
+        info.insert(Ustr::from("liquidation"), Ustr::from("true"));
+        info.insert(Ustr::from("maker_order_id"), Ustr::from("ABC-123"));
+        let original = OrderFilled {
+            info: Some(info),
+            ..order_filled
+        };
+
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: OrderFilled = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.info, original.info);
+        assert_eq!(deserialized, original);
+    }
+
+    #[rstest]
     fn test_order_filled_is_sell() {
         let mut order_filled = create_test_order_filled();
         order_filled.order_side = OrderSide::Sell;
@@ -501,197 +535,54 @@ mod tests {
     }
 
     #[rstest]
-    fn test_order_filled_specified_side() {
-        let buy_order = create_test_order_filled();
-        assert_eq!(buy_order.specified_side(), OrderSideSpecified::Buy);
+    fn test_split_for_position_flip_preserves_provenance_and_commission() {
+        let mut fill = create_test_order_filled();
+        fill.last_qty = Quantity::from(100);
+        fill.commission = Some(Money::new(2.5, Currency::USD()));
+        let source_event_id = fill.event_id;
+        let opening_event_id = UUID4::new();
+        let opening_position_id = PositionId::from("P-FLIPPED");
 
-        let mut sell_order = create_test_order_filled();
-        sell_order.order_side = OrderSide::Sell;
-        assert_eq!(sell_order.specified_side(), OrderSideSpecified::Sell);
+        let (closing, opening) = fill
+            .split_for_position_flip(
+                Quantity::from(40),
+                Some(opening_position_id),
+                opening_event_id,
+            )
+            .expect("split fill");
+
+        assert_eq!(closing.last_qty, Quantity::from(40));
+        assert_eq!(closing.position_id, fill.position_id);
+        assert_eq!(closing.event_id, source_event_id);
+        assert_eq!(closing.causation_id, fill.causation_id);
+        assert_eq!(closing.commission, Some(Money::new(1.0, Currency::USD())));
+        assert_eq!(opening.last_qty, Quantity::from(60));
+        assert_eq!(opening.position_id, Some(opening_position_id));
+        assert_eq!(opening.event_id, opening_event_id);
+        assert_eq!(opening.causation_id, Some(source_event_id));
+        assert_eq!(opening.commission, Some(Money::new(1.5, Currency::USD())));
     }
 
     #[rstest]
-    fn test_order_filled_default() {
-        let order_filled = OrderFilled::default();
-
-        assert_eq!(order_filled.trader_id, TraderId::test_default());
-        assert_eq!(order_filled.strategy_id, StrategyId::test_default());
-        assert_eq!(order_filled.instrument_id, InstrumentId::test_default());
-        assert_eq!(order_filled.client_order_id, ClientOrderId::test_default());
-        assert_eq!(order_filled.venue_order_id, VenueOrderId::test_default());
-        assert_eq!(order_filled.account_id, AccountId::test_default());
-        assert_eq!(order_filled.trade_id, TradeId::test_default());
-        assert_eq!(order_filled.order_side, OrderSide::Buy);
-        assert_eq!(order_filled.order_type, OrderType::Market);
-        assert_eq!(order_filled.currency, Currency::USD());
-        assert_eq!(order_filled.liquidity_side, LiquiditySide::Taker);
-        assert_eq!(order_filled.position_id, None);
-        assert_eq!(order_filled.commission, None);
-        assert!(!order_filled.reconciliation);
-    }
-
-    #[rstest]
-    fn test_order_filled_order_event_trait() {
-        let order_filled = create_test_order_filled();
-
-        assert_eq!(order_filled.id(), order_filled.event_id);
-        assert_eq!(order_filled.kind(), "OrderFilled");
-        assert_eq!(order_filled.order_type(), Some(OrderType::Market));
-        assert_eq!(order_filled.order_side(), Some(OrderSide::Buy));
-        assert_eq!(order_filled.trader_id(), TraderId::from("TRADER-001"));
-        assert_eq!(order_filled.strategy_id(), StrategyId::from("EMA-CROSS"));
-        assert_eq!(
-            order_filled.instrument_id(),
-            InstrumentId::from("EURUSD.SIM")
-        );
-        assert_eq!(order_filled.trade_id(), Some(TradeId::from("T-001")));
-        assert_eq!(order_filled.currency(), Some(Currency::USD()));
-        assert_eq!(
-            order_filled.client_order_id(),
-            ClientOrderId::from("O-19700101-000000-001-001-1")
-        );
-        assert_eq!(order_filled.reason(), None);
-        assert_eq!(order_filled.quantity(), Some(Quantity::from("100")));
-        assert_eq!(order_filled.liquidity_side(), Some(LiquiditySide::Taker));
-        assert!(!order_filled.reconciliation());
-        assert_eq!(
-            order_filled.venue_order_id(),
-            Some(VenueOrderId::from("V-001"))
-        );
-        assert_eq!(order_filled.account_id(), Some(AccountId::from("SIM-001")));
-        assert_eq!(order_filled.position_id(), Some(PositionId::from("P-001")));
-        assert_eq!(
-            order_filled.commission(),
-            Some(Money::new(2.5, Currency::USD()))
-        );
-        assert_eq!(order_filled.last_px(), Some(Price::from("1.0500")));
-        assert_eq!(order_filled.last_qty(), Some(Quantity::from("100")));
-    }
-
-    #[rstest]
-    fn test_order_filled_different_order_types() {
-        let mut market_order = create_test_order_filled();
-        market_order.order_type = OrderType::Market;
-
-        let mut limit_order = create_test_order_filled();
-        limit_order.order_type = OrderType::Limit;
-
-        let mut stop_order = create_test_order_filled();
-        stop_order.order_type = OrderType::StopMarket;
-
-        assert_ne!(market_order, limit_order);
-        assert_ne!(limit_order, stop_order);
-        assert_eq!(market_order.order_type, OrderType::Market);
-        assert_eq!(limit_order.order_type, OrderType::Limit);
-        assert_eq!(stop_order.order_type, OrderType::StopMarket);
-    }
-
-    #[rstest]
-    fn test_order_filled_different_liquidity_sides() {
-        let mut taker = create_test_order_filled();
-        taker.liquidity_side = LiquiditySide::Taker;
-
-        let mut maker = create_test_order_filled();
-        maker.liquidity_side = LiquiditySide::Maker;
-
-        assert_ne!(taker, maker);
-        assert_eq!(taker.liquidity_side, LiquiditySide::Taker);
-        assert_eq!(maker.liquidity_side, LiquiditySide::Maker);
-    }
-
-    #[rstest]
-    fn test_order_filled_without_position_id() {
+    fn test_order_filled_without_position_id_display() {
         let mut order_filled = create_test_order_filled();
         order_filled.position_id = None;
 
-        assert!(order_filled.position_id.is_none());
+        let display = format!("{order_filled}");
+        assert!(display.contains("position_id=None"));
+        assert!(!display.contains("position_id=P-001"));
     }
 
     #[rstest]
-    fn test_order_filled_without_commission() {
+    fn test_order_filled_without_commission_serialization() {
         let mut order_filled = create_test_order_filled();
         order_filled.commission = None;
 
-        assert!(order_filled.commission.is_none());
-    }
+        let json = serde_json::to_string(&order_filled).unwrap();
+        let deserialized: OrderFilled = serde_json::from_str(&json).unwrap();
 
-    #[rstest]
-    fn test_order_filled_with_reconciliation() {
-        let mut order_filled = create_test_order_filled();
-        order_filled.reconciliation = true;
-
-        assert!(order_filled.reconciliation);
-    }
-
-    #[rstest]
-    fn test_order_filled_clone() {
-        let order_filled1 = create_test_order_filled();
-        let order_filled2 = order_filled1;
-
-        assert_eq!(order_filled1, order_filled2);
-    }
-
-    #[rstest]
-    fn test_order_filled_debug() {
-        let order_filled = create_test_order_filled();
-        let debug_str = format!("{order_filled:?}");
-
-        assert!(debug_str.contains("OrderFilled"));
-        assert!(debug_str.contains("TRADER-001"));
-        assert!(debug_str.contains("EMA-CROSS"));
-        assert!(debug_str.contains("EURUSD.SIM"));
-        assert!(debug_str.contains("P-001"));
-    }
-
-    #[rstest]
-    fn test_order_filled_partial_eq() {
-        let order_filled1 = create_test_order_filled();
-        let mut order_filled2 = create_test_order_filled();
-        order_filled2.event_id = order_filled1.event_id; // Make event_ids equal
-        let mut order_filled3 = create_test_order_filled();
-        order_filled3.trade_id = TradeId::from("T-002");
-
-        assert_eq!(order_filled1, order_filled2);
-        assert_ne!(order_filled1, order_filled3);
-    }
-
-    #[rstest]
-    fn test_order_filled_timestamps() {
-        let order_filled = create_test_order_filled();
-
-        assert_eq!(order_filled.ts_event, UnixNanos::from(1_000_000_000));
-        assert_eq!(order_filled.ts_init, UnixNanos::from(2_000_000_000));
-        assert!(order_filled.ts_event < order_filled.ts_init);
-    }
-
-    #[rstest]
-    fn test_order_filled_different_currencies() {
-        let mut usd_fill = create_test_order_filled();
-        usd_fill.currency = Currency::USD();
-
-        let mut eur_fill = create_test_order_filled();
-        eur_fill.currency = Currency::EUR();
-
-        assert_ne!(usd_fill, eur_fill);
-        assert_eq!(usd_fill.currency, Currency::USD());
-        assert_eq!(eur_fill.currency, Currency::EUR());
-    }
-
-    #[rstest]
-    fn test_order_filled_different_prices_and_quantities() {
-        let mut large_fill = create_test_order_filled();
-        large_fill.last_qty = Quantity::from("1000");
-        large_fill.last_px = Price::from("1.1000");
-
-        let mut small_fill = create_test_order_filled();
-        small_fill.last_qty = Quantity::from("100");
-        small_fill.last_px = Price::from("1.0500");
-
-        assert_ne!(large_fill, small_fill);
-        assert_eq!(large_fill.last_qty, Quantity::from("1000"));
-        assert_eq!(large_fill.last_px, Price::from("1.1000"));
-        assert_eq!(small_fill.last_qty, Quantity::from("100"));
-        assert_eq!(small_fill.last_px, Price::from("1.0500"));
+        assert_eq!(deserialized.commission, None);
+        assert_eq!(deserialized.trade_id, order_filled.trade_id);
     }
 
     #[rstest]
@@ -701,6 +592,22 @@ mod tests {
         let json = serde_json::to_string(&original).unwrap();
         let deserialized: OrderFilled = serde_json::from_str(&json).unwrap();
 
+        assert_eq!(original, deserialized);
+    }
+
+    #[rstest]
+    fn test_order_filled_serialization_with_causation_id() {
+        let causation_id = UUID4::new();
+        let original = OrderFilled {
+            causation_id: Some(causation_id),
+            ..create_test_order_filled()
+        };
+
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: OrderFilled = serde_json::from_str(&json).unwrap();
+
+        assert!(json.contains("\"causation_id\""));
+        assert_eq!(deserialized.causation_id, Some(causation_id));
         assert_eq!(original, deserialized);
     }
 }

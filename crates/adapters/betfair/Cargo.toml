@@ -1,0 +1,114 @@
+[package]
+name = "nice-betfair"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Betfair exchange integration adapter for the nice trading engine"
+categories.workspace = true
+keywords.workspace = true
+documentation.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "nice_betfair"
+crate-type = ["rlib"]
+
+[features]
+examples = ["nice-live/node", "nice-trading/examples"]
+
+high-precision = [
+  "nice-model/high-precision",
+  "nice-serialization/high-precision",
+]
+
+
+[package.metadata.cargo-machete]
+ignored = ["arrow"] # Used by `custom_data` macro expansion
+
+[package.metadata.docs.rs]
+# Python docs depend on the local pyo3-stub-gen patch for now, which published crates do not carry
+features = ["high-precision"]
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+nice-common = { workspace = true, features = ["live"] }
+nice-core = { workspace = true }
+nice-live = { workspace = true }
+nice-model = { workspace = true }
+nice-network = { workspace = true }
+nice-persistence-macros = { workspace = true }
+nice-serialization = { workspace = true, features = ["arrow"] }
+nice-system = { workspace = true, optional = true }
+
+ahash = { workspace = true }
+anyhow = { workspace = true }
+arrow = { workspace = true } # Used by `custom_data` macro expansion (cargo-machete false positive)
+async-trait = { workspace = true }
+bon = { workspace = true }
+bytes = { workspace = true }
+bzip2 = { workspace = true }
+flate2 = { workspace = true }
+jiff = { workspace = true }
+log = { workspace = true }
+parking_lot = { workspace = true }
+rust_decimal = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+strum = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+tokio-util = { workspace = true }
+ustr = { workspace = true }
+zeroize = { workspace = true }
+
+pyo3 = { workspace = true, optional = true }
+pyo3-stub-gen = { workspace = true, optional = true }
+
+[dev-dependencies]
+nice-backtest = { workspace = true }
+nice-live = { workspace = true, features = ["node", "test-support"] }
+nice-testkit = { workspace = true, default-features = false, features = [
+  "testers",
+] }
+nice-trading = { workspace = true }
+
+axum = { workspace = true }
+dotenvy = { workspace = true }
+proptest = { workspace = true }
+rstest = { workspace = true }
+tokio = { workspace = true, features = ["full", "test-util"] }
+toml = { workspace = true }
+
+# Run with `cargo run -p nice-betfair --example betfair-data-tester --features examples`
+[[example]]
+name = "betfair-data-tester"
+path = "examples/node_data_tester.rs"
+required-features = ["examples"]
+doc = false
+
+# Run with `cargo run -p nice-betfair --example betfair-exec-tester --features examples`
+[[example]]
+name = "betfair-exec-tester"
+path = "examples/node_exec_tester.rs"
+required-features = ["examples"]
+doc = false
+
+# Run with `cargo run -p nice-betfair --example betfair-load-file`
+[[example]]
+name = "betfair-load-file"
+path = "examples/load_betfair_file.rs"
+doc = false
+
+# Run with `cargo run -p nice-betfair --features examples --example betfair-backtest`
+[[example]]
+name = "betfair-backtest"
+path = "examples/betfair_backtest.rs"
+required-features = ["examples"]
+doc = false

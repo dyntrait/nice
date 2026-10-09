@@ -1,51 +1,40 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : request.rs
-//  @Author       : dyntrait Created On 2026/1/5 15:59
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
 
 use std::num::NonZeroUsize;
 
-use chrono::{DateTime, Utc};
-use indexmap::IndexMap;
-use nice_core::{UUID4, UnixNanos};
+use jiff::Timestamp;
+use nice_core::{Params, UUID4, UnixNanos};
 use nice_model::{
     data::{BarType, DataType},
-    identifiers::{ClientId, InstrumentId, Venue},
+    identifiers::{ClientId, InstrumentId, OptionSeriesId, Venue},
 };
+use serde::{Deserialize, Serialize};
 
 use super::check_client_id_or_venue;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RequestCustomData {
     pub client_id: ClientId,
     pub data_type: DataType,
-    pub start: Option<DateTime<Utc>>,
-    pub end: Option<DateTime<Utc>>,
+    pub start: Option<Timestamp>,
+    pub end: Option<Timestamp>,
     pub limit: Option<NonZeroUsize>,
     pub request_id: UUID4,
     pub ts_init: UnixNanos,
-    pub params: Option<IndexMap<String, String>>,
+    pub params: Option<Params>,
 }
 
 impl RequestCustomData {
     /// Creates a new [`RequestCustomData`] instance.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         client_id: ClientId,
         data_type: DataType,
-        start: Option<DateTime<Utc>>,
-        end: Option<DateTime<Utc>>,
+        start: Option<Timestamp>,
+        end: Option<Timestamp>,
         limit: Option<NonZeroUsize>,
         request_id: UUID4,
         ts_init: UnixNanos,
-        params: Option<IndexMap<String, String>>,
+        params: Option<Params>,
     ) -> Self {
         Self {
             client_id,
@@ -60,28 +49,27 @@ impl RequestCustomData {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RequestInstrument {
     pub instrument_id: InstrumentId,
-    pub start: Option<DateTime<Utc>>,
-    pub end: Option<DateTime<Utc>>,
+    pub start: Option<Timestamp>,
+    pub end: Option<Timestamp>,
     pub client_id: Option<ClientId>,
     pub request_id: UUID4,
     pub ts_init: UnixNanos,
-    pub params: Option<IndexMap<String, String>>,
+    pub params: Option<Params>,
 }
 
 impl RequestInstrument {
     /// Creates a new [`RequestInstrument`] instance.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         instrument_id: InstrumentId,
-        start: Option<DateTime<Utc>>,
-        end: Option<DateTime<Utc>>,
+        start: Option<Timestamp>,
+        end: Option<Timestamp>,
         client_id: Option<ClientId>,
         request_id: UUID4,
         ts_init: UnixNanos,
-        params: Option<IndexMap<String, String>>,
+        params: Option<Params>,
     ) -> Self {
         Self {
             instrument_id,
@@ -95,28 +83,27 @@ impl RequestInstrument {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RequestInstruments {
-    pub start: Option<DateTime<Utc>>,
-    pub end: Option<DateTime<Utc>>,
+    pub start: Option<Timestamp>,
+    pub end: Option<Timestamp>,
     pub client_id: Option<ClientId>,
     pub venue: Option<Venue>,
     pub request_id: UUID4,
     pub ts_init: UnixNanos,
-    pub params: Option<IndexMap<String, String>>,
+    pub params: Option<Params>,
 }
 
 impl RequestInstruments {
     /// Creates a new [`RequestInstruments`] instance.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        start: Option<DateTime<Utc>>,
-        end: Option<DateTime<Utc>>,
+        start: Option<Timestamp>,
+        end: Option<Timestamp>,
         client_id: Option<ClientId>,
         venue: Option<Venue>,
         request_id: UUID4,
         ts_init: UnixNanos,
-        params: Option<IndexMap<String, String>>,
+        params: Option<Params>,
     ) -> Self {
         check_client_id_or_venue(&client_id, &venue);
         Self {
@@ -131,26 +118,25 @@ impl RequestInstruments {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RequestBookSnapshot {
     pub instrument_id: InstrumentId,
     pub depth: Option<NonZeroUsize>,
     pub client_id: Option<ClientId>,
     pub request_id: UUID4,
     pub ts_init: UnixNanos,
-    pub params: Option<IndexMap<String, String>>,
+    pub params: Option<Params>,
 }
 
 impl RequestBookSnapshot {
     /// Creates a new [`RequestBookSnapshot`] instance.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         instrument_id: InstrumentId,
         depth: Option<NonZeroUsize>,
         client_id: Option<ClientId>,
         request_id: UUID4,
         ts_init: UnixNanos,
-        params: Option<IndexMap<String, String>>,
+        params: Option<Params>,
     ) -> Self {
         Self {
             instrument_id,
@@ -163,30 +149,30 @@ impl RequestBookSnapshot {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RequestQuotes {
     pub instrument_id: InstrumentId,
-    pub start: Option<DateTime<Utc>>,
-    pub end: Option<DateTime<Utc>>,
+    pub start: Option<Timestamp>,
+    pub end: Option<Timestamp>,
     pub limit: Option<NonZeroUsize>,
     pub client_id: Option<ClientId>,
     pub request_id: UUID4,
     pub ts_init: UnixNanos,
-    pub params: Option<IndexMap<String, String>>,
+    pub params: Option<Params>,
 }
 
 impl RequestQuotes {
     /// Creates a new [`RequestQuotes`] instance.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         instrument_id: InstrumentId,
-        start: Option<DateTime<Utc>>,
-        end: Option<DateTime<Utc>>,
+        start: Option<Timestamp>,
+        end: Option<Timestamp>,
         limit: Option<NonZeroUsize>,
         client_id: Option<ClientId>,
         request_id: UUID4,
         ts_init: UnixNanos,
-        params: Option<IndexMap<String, String>>,
+        params: Option<Params>,
     ) -> Self {
         Self {
             instrument_id,
@@ -201,30 +187,30 @@ impl RequestQuotes {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RequestTrades {
     pub instrument_id: InstrumentId,
-    pub start: Option<DateTime<Utc>>,
-    pub end: Option<DateTime<Utc>>,
+    pub start: Option<Timestamp>,
+    pub end: Option<Timestamp>,
     pub limit: Option<NonZeroUsize>,
     pub client_id: Option<ClientId>,
     pub request_id: UUID4,
     pub ts_init: UnixNanos,
-    pub params: Option<IndexMap<String, String>>,
+    pub params: Option<Params>,
 }
 
 impl RequestTrades {
     /// Creates a new [`RequestTrades`] instance.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         instrument_id: InstrumentId,
-        start: Option<DateTime<Utc>>,
-        end: Option<DateTime<Utc>>,
+        start: Option<Timestamp>,
+        end: Option<Timestamp>,
         limit: Option<NonZeroUsize>,
         client_id: Option<ClientId>,
         request_id: UUID4,
         ts_init: UnixNanos,
-        params: Option<IndexMap<String, String>>,
+        params: Option<Params>,
     ) -> Self {
         Self {
             instrument_id,
@@ -239,32 +225,101 @@ impl RequestTrades {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RequestFundingRates {
+    pub instrument_id: InstrumentId,
+    pub start: Option<Timestamp>,
+    pub end: Option<Timestamp>,
+    pub limit: Option<NonZeroUsize>,
+    pub client_id: Option<ClientId>,
+    pub request_id: UUID4,
+    pub ts_init: UnixNanos,
+    pub params: Option<Params>,
+}
+
+impl RequestFundingRates {
+    /// Creates a new [`RequestFundingRates`] instance.
+    #[expect(clippy::too_many_arguments)]
+    pub fn new(
+        instrument_id: InstrumentId,
+        start: Option<Timestamp>,
+        end: Option<Timestamp>,
+        limit: Option<NonZeroUsize>,
+        client_id: Option<ClientId>,
+        request_id: UUID4,
+        ts_init: UnixNanos,
+        params: Option<Params>,
+    ) -> Self {
+        Self {
+            instrument_id,
+            start,
+            end,
+            limit,
+            client_id,
+            request_id,
+            ts_init,
+            params,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RequestOptionChainReferencePrice {
+    pub series_id: OptionSeriesId,
+    pub instrument_id: InstrumentId,
+    pub client_id: Option<ClientId>,
+    pub request_id: UUID4,
+    pub ts_init: UnixNanos,
+    pub params: Option<Params>,
+}
+
+impl RequestOptionChainReferencePrice {
+    /// Creates a new [`RequestOptionChainReferencePrice`] instance.
+    pub fn new(
+        series_id: OptionSeriesId,
+        instrument_id: InstrumentId,
+        client_id: Option<ClientId>,
+        request_id: UUID4,
+        ts_init: UnixNanos,
+        params: Option<Params>,
+    ) -> Self {
+        Self {
+            series_id,
+            instrument_id,
+            client_id,
+            request_id,
+            ts_init,
+            params,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RequestBookDepth {
     pub instrument_id: InstrumentId,
-    pub start: Option<DateTime<Utc>>,
-    pub end: Option<DateTime<Utc>>,
+    pub start: Option<Timestamp>,
+    pub end: Option<Timestamp>,
     pub limit: Option<NonZeroUsize>,
     pub depth: Option<NonZeroUsize>,
     pub client_id: Option<ClientId>,
     pub request_id: UUID4,
     pub ts_init: UnixNanos,
-    pub params: Option<IndexMap<String, String>>,
+    pub params: Option<Params>,
 }
 
 impl RequestBookDepth {
     /// Creates a new [`RequestBookDepth`] instance.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         instrument_id: InstrumentId,
-        start: Option<DateTime<Utc>>,
-        end: Option<DateTime<Utc>>,
+        start: Option<Timestamp>,
+        end: Option<Timestamp>,
         limit: Option<NonZeroUsize>,
         depth: Option<NonZeroUsize>,
         client_id: Option<ClientId>,
         request_id: UUID4,
         ts_init: UnixNanos,
-        params: Option<IndexMap<String, String>>,
+        params: Option<Params>,
     ) -> Self {
         Self {
             instrument_id,
@@ -280,30 +335,68 @@ impl RequestBookDepth {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct RequestBars {
-    pub bar_type: BarType,
-    pub start: Option<DateTime<Utc>>,
-    pub end: Option<DateTime<Utc>>,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RequestBookDeltas {
+    pub instrument_id: InstrumentId,
+    pub start: Option<Timestamp>,
+    pub end: Option<Timestamp>,
     pub limit: Option<NonZeroUsize>,
     pub client_id: Option<ClientId>,
     pub request_id: UUID4,
     pub ts_init: UnixNanos,
-    pub params: Option<IndexMap<String, String>>,
+    pub params: Option<Params>,
 }
 
-impl RequestBars {
-    /// Creates a new [`RequestBars`] instance.
-    #[allow(clippy::too_many_arguments)]
+impl RequestBookDeltas {
+    /// Creates a new [`RequestBookDeltas`] instance.
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
-        bar_type: BarType,
-        start: Option<DateTime<Utc>>,
-        end: Option<DateTime<Utc>>,
+        instrument_id: InstrumentId,
+        start: Option<Timestamp>,
+        end: Option<Timestamp>,
         limit: Option<NonZeroUsize>,
         client_id: Option<ClientId>,
         request_id: UUID4,
         ts_init: UnixNanos,
-        params: Option<IndexMap<String, String>>,
+        params: Option<Params>,
+    ) -> Self {
+        Self {
+            instrument_id,
+            start,
+            end,
+            limit,
+            client_id,
+            request_id,
+            ts_init,
+            params,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RequestBars {
+    pub bar_type: BarType,
+    pub start: Option<Timestamp>,
+    pub end: Option<Timestamp>,
+    pub limit: Option<NonZeroUsize>,
+    pub client_id: Option<ClientId>,
+    pub request_id: UUID4,
+    pub ts_init: UnixNanos,
+    pub params: Option<Params>,
+}
+
+impl RequestBars {
+    /// Creates a new [`RequestBars`] instance.
+    #[expect(clippy::too_many_arguments)]
+    pub fn new(
+        bar_type: BarType,
+        start: Option<Timestamp>,
+        end: Option<Timestamp>,
+        limit: Option<NonZeroUsize>,
+        client_id: Option<ClientId>,
+        request_id: UUID4,
+        ts_init: UnixNanos,
+        params: Option<Params>,
     ) -> Self {
         Self {
             bar_type,
@@ -314,6 +407,73 @@ impl RequestBars {
             request_id,
             ts_init,
             params,
+        }
+    }
+}
+
+/// A request to join multiple in-flight data requests under a single parent response.
+///
+/// The engine first issues a combined date-range request to bound the join window,
+/// then fans out the leg responses through the request-pipeline machinery so the
+/// caller receives one consolidated `DataResponse` keyed by the join `request_id`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RequestJoin {
+    pub request_ids: Vec<UUID4>,
+    pub start: Option<Timestamp>,
+    pub end: Option<Timestamp>,
+    pub request_id: UUID4,
+    pub ts_init: UnixNanos,
+    pub params: Option<Params>,
+    pub correlation_id: Option<UUID4>,
+}
+
+impl RequestJoin {
+    /// Creates a new [`RequestJoin`] instance.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `request_ids` is empty.
+    pub fn new(
+        request_ids: Vec<UUID4>,
+        start: Option<Timestamp>,
+        end: Option<Timestamp>,
+        request_id: UUID4,
+        ts_init: UnixNanos,
+        params: Option<Params>,
+        correlation_id: Option<UUID4>,
+    ) -> Self {
+        assert!(!request_ids.is_empty(), "request_ids must not be empty");
+        Self {
+            request_ids,
+            start,
+            end,
+            request_id,
+            ts_init,
+            params,
+            correlation_id,
+        }
+    }
+
+    /// Returns a fresh [`RequestJoin`] for the combined date-range bootstrap leg.
+    ///
+    /// The returned request inherits `request_ids` and `params`, carries the
+    /// supplied dates, and sets `correlation_id` to the original request id so
+    /// the response can be matched back to the parent join.
+    #[must_use]
+    pub fn with_dates(
+        &self,
+        start: Option<Timestamp>,
+        end: Option<Timestamp>,
+        ts_init: UnixNanos,
+    ) -> Self {
+        Self {
+            request_ids: self.request_ids.clone(),
+            start,
+            end,
+            request_id: UUID4::new(),
+            ts_init,
+            params: self.params.clone(),
+            correlation_id: Some(self.request_id),
         }
     }
 }

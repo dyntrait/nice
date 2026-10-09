@@ -1,0 +1,102 @@
+[package]
+name = "nice-databento"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Databento integration adapter for the nice trading engine"
+categories.workspace = true
+keywords.workspace = true
+documentation.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "nice_databento"
+crate-type = ["rlib"]
+
+[features]
+default = ["live", "high-precision"]
+arrow = ["dep:arrow", "nice-serialization"]
+
+live = ["nice-live", "nice-live/node", "nice-system", "dotenvy"]
+
+high-precision = [
+  "nice-model/high-precision",
+  "nice-serialization?/high-precision",
+]
+
+[package.metadata.docs.rs]
+# Python docs depend on the local pyo3-stub-gen patch for now, which published crates do not carry
+features = ["arrow", "high-precision", "live"]
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+nice-common = { workspace = true, features = ["live"] }
+nice-core = { workspace = true }
+nice-live = { workspace = true, optional = true }
+nice-model = { workspace = true }
+nice-network = { workspace = true }
+nice-serialization = { workspace = true, features = [
+  "arrow",
+], optional = true }
+nice-system = { workspace = true, optional = true }
+
+ahash = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+databento = { workspace = true }
+fallible-streaming-iterator = { workspace = true }
+indexmap = { workspace = true }
+jiff = { workspace = true }
+log = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+strum = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+ustr = { workspace = true }
+zeroize = { workspace = true }
+
+arrow = { workspace = true, optional = true }
+dotenvy = { workspace = true, optional = true }
+pyo3 = { workspace = true, optional = true }
+pyo3-async-runtimes = { workspace = true, optional = true }
+pyo3-stub-gen = { workspace = true, optional = true }
+
+[dev-dependencies]
+nice-testkit = { workspace = true, default-features = false, features = [
+  "testers",
+] }
+
+criterion = { workspace = true }
+proptest = { workspace = true }
+rstest = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
+
+# Canonical data-path benches; see crates/adapters/databento/benches/BENCHMARKS.md for context
+[[bench]]
+name = "data"
+harness = false
+
+[[bench]]
+name = "micros"
+harness = false
+
+[[bench]]
+name = "clients"
+harness = false
+required-features = ["live"]
+
+# Run with `cargo run --example databento-data-tester --package nice-databento`.
+[[example]]
+name = "databento-data-tester"
+path = "examples/node_data_tester.rs"
+required-features = ["live"]
+doc = false

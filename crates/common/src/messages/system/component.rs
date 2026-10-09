@@ -1,14 +1,3 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : component.rs.rs
-//  @Author       : dyntrait Created On 2026/1/5 16:13
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
 
 use std::{
     any::Any,
@@ -29,7 +18,7 @@ use crate::enums::ComponentState;
 #[serde(tag = "type")]
 #[cfg_attr(
     feature = "python",
-    pyo3::pyclass(module = "nice_trader.core.nice_pyo3.model")
+    pyo3::pyclass(module = "nice_trader.model", from_py_object)
 )]
 pub struct ComponentStateChanged {
     /// The trader ID associated with the event.
@@ -52,7 +41,7 @@ pub struct ComponentStateChanged {
 
 impl ComponentStateChanged {
     /// Creates a new [`ComponentStateChanged`] instance.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
         trader_id: TraderId,

@@ -1,0 +1,149 @@
+[package]
+name = "nice-bybit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Bybit exchange integration adapter for the nice trading engine"
+categories.workspace = true
+keywords.workspace = true
+documentation.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "nice_bybit"
+crate-type = ["rlib"]
+
+[features]
+default = ["high-precision"]
+examples = [
+  "nice-live/node",
+  "nice-network/transport-sockudo",
+  "nice-trading/examples",
+]
+
+
+high-precision = ["nice-model/high-precision"]
+
+[package.metadata.docs.rs]
+# Python docs depend on the local pyo3-stub-gen patch for now, which published crates do not carry
+features = ["examples", "high-precision"]
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+nice-common = { workspace = true, features = ["live"] }
+nice-core = { workspace = true }
+nice-live = { workspace = true }
+nice-model = { workspace = true }
+nice-network = { workspace = true, features = ["transport-sockudo"] }
+nice-system = { workspace = true, optional = true }
+
+ahash = { workspace = true }
+anyhow = { workspace = true }
+arc-swap = { workspace = true }
+async-stream = { workspace = true }
+async-trait = { workspace = true }
+aws-lc-rs = { workspace = true }
+bon = { workspace = true }
+dashmap = { workspace = true }
+derive_builder = { workspace = true }
+dotenvy = { workspace = true }
+futures-util = { workspace = true }
+jiff = { workspace = true }
+log = { workspace = true }
+parking_lot = { workspace = true }
+rust_decimal = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_repr = { workspace = true }
+serde_urlencoded = { workspace = true }
+strum = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+tokio-util = { workspace = true }
+ustr = { workspace = true }
+zeroize = { workspace = true }
+
+pyo3 = { workspace = true, optional = true }
+pyo3-async-runtimes = { workspace = true, optional = true }
+pyo3-stub-gen = { workspace = true, optional = true }
+
+[dev-dependencies]
+nice-testkit = { workspace = true, default-features = false, features = [
+  "testers",
+] }
+nice-trading = { workspace = true }
+
+axum = { workspace = true }
+criterion = { workspace = true }
+rstest = { workspace = true }
+rust_decimal_macros = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
+toml = { workspace = true }
+
+# Run with `cargo bench -p nice-bybit --bench websocket`
+[[bench]]
+name = "websocket"
+harness = false
+
+# Run with `cargo run -p nice-bybit --bin bybit-http`.
+[[bin]]
+name = "bybit-http"
+path = "bin/http.rs"
+doc = false
+test = false
+
+# Run with `cargo run -p nice-bybit --bin bybit-ws-data`.
+[[bin]]
+name = "bybit-ws-data"
+path = "bin/ws_data.rs"
+doc = false
+test = false
+
+# Run with `cargo run -p nice-bybit --bin bybit-flatten`.
+[[bin]]
+name = "bybit-flatten"
+path = "bin/flatten.rs"
+doc = false
+test = false
+
+# Run with `cargo run --example bybit-data-tester --package nice-bybit --features examples`.
+[[example]]
+name = "bybit-data-tester"
+path = "examples/node_data_tester.rs"
+required-features = ["examples"]
+doc = false
+
+# Run with `cargo run --example bybit-exec-tester --package nice-bybit --features examples`.
+[[example]]
+name = "bybit-exec-tester"
+path = "examples/node_exec_tester.rs"
+required-features = ["examples"]
+doc = false
+
+# Run with `cargo run --example bybit-greeks-tester --package nice-bybit --features examples`.
+[[example]]
+name = "bybit-greeks-tester"
+path = "examples/node_greeks.rs"
+required-features = ["examples"]
+doc = false
+
+# Run with `cargo run --example bybit-option-chain --package nice-bybit --features examples`.
+[[example]]
+name = "bybit-option-chain"
+path = "examples/node_option_chain.rs"
+required-features = ["examples"]
+doc = false
+
+# Run with `cargo run --example bybit-delta-neutral --package nice-bybit --features examples`.
+[[example]]
+name = "bybit-delta-neutral"
+path = "examples/node_delta_neutral.rs"
+required-features = ["examples"]
+doc = false

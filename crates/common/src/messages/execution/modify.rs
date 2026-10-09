@@ -1,20 +1,8 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : modify.rs
-//  @Author       : dyntrait Created On 2026/1/5 16:09
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
 
 use std::fmt::Display;
 
 use derive_builder::Builder;
-use indexmap::IndexMap;
-use nice_core::{UUID4, UnixNanos};
+use nice_core::{Params, UUID4, UnixNanos};
 use nice_model::{
     identifiers::{ClientId, ClientOrderId, InstrumentId, StrategyId, TraderId, VenueOrderId},
     types::{Price, Quantity},
@@ -35,12 +23,17 @@ pub struct ModifyOrder {
     pub trigger_price: Option<Price>,
     pub command_id: UUID4,
     pub ts_init: UnixNanos,
-    pub params: Option<IndexMap<String, String>>,
+    pub params: Option<Params>,
+    #[builder(default)]
+    pub correlation_id: Option<UUID4>,
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub causation_id: Option<UUID4>,
 }
 
 impl ModifyOrder {
     /// Creates a new [`ModifyOrder`] instance.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
         trader_id: TraderId,
@@ -54,7 +47,8 @@ impl ModifyOrder {
         trigger_price: Option<Price>,
         command_id: UUID4,
         ts_init: UnixNanos,
-        params: Option<IndexMap<String, String>>,
+        params: Option<Params>,
+        correlation_id: Option<UUID4>,
     ) -> Self {
         Self {
             trader_id,
@@ -69,6 +63,8 @@ impl ModifyOrder {
             command_id,
             ts_init,
             params,
+            correlation_id,
+            causation_id: None,
         }
     }
 }
@@ -89,6 +85,65 @@ impl Display for ModifyOrder {
                 .map_or("None".to_string(), |trigger_price| format!(
                     "{trigger_price}"
                 )),
+        )
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize, Builder)]
+#[serde(tag = "type")]
+pub struct BatchModifyOrders {
+    pub trader_id: TraderId,
+    pub client_id: Option<ClientId>,
+    pub strategy_id: StrategyId,
+    pub instrument_id: InstrumentId,
+    pub modifies: Vec<ModifyOrder>,
+    pub command_id: UUID4,
+    pub ts_init: UnixNanos,
+    pub params: Option<Params>,
+    #[builder(default)]
+    pub correlation_id: Option<UUID4>,
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub causation_id: Option<UUID4>,
+}
+
+impl BatchModifyOrders {
+    /// Creates a new [`BatchModifyOrders`] instance.
+    #[expect(clippy::too_many_arguments)]
+    #[must_use]
+    pub fn new(
+        trader_id: TraderId,
+        client_id: Option<ClientId>,
+        strategy_id: StrategyId,
+        instrument_id: InstrumentId,
+        modifies: Vec<ModifyOrder>,
+        command_id: UUID4,
+        ts_init: UnixNanos,
+        params: Option<Params>,
+        correlation_id: Option<UUID4>,
+    ) -> Self {
+        Self {
+            trader_id,
+            client_id,
+            strategy_id,
+            instrument_id,
+            modifies,
+            command_id,
+            ts_init,
+            params,
+            correlation_id,
+            causation_id: None,
+        }
+    }
+}
+
+impl Display for BatchModifyOrders {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "BatchModifyOrders(instrument_id={}, modifies={})",
+            self.instrument_id,
+            self.modifies.len(),
         )
     }
 }

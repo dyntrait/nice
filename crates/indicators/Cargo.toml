@@ -5,8 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
-readme.workspace = true
-description.workspace = true
+description = "Technical indicators for the nice trading engine"
 categories.workspace = true
 keywords.workspace = true
 documentation.workspace = true
@@ -16,30 +15,31 @@ homepage.workspace = true
 [lints]
 workspace = true
 
-
 [lib]
 name = "nice_indicators"
-crate-type = ["rlib", "cdylib"]
+crate-type = ["rlib"]
 
 [features]
 default = []
-extension-module = []
 
 
 [package.metadata.docs.rs]
-all-features = true
+# Python docs depend on the local pyo3-stub-gen patch for now, which published crates do not carry
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 nice-core = { workspace = true }
-nice-model = { workspace = true, features = ["stubs"] }
+nice-model = { workspace = true }
 
 anyhow = { workspace = true }
 arraydeque = { workspace = true }
 strum = { workspace = true }
 
-
+pyo3 = { workspace = true, optional = true }
+pyo3-stub-gen = { workspace = true, optional = true }
 
 [dev-dependencies]
-rstest = { workspace = true }
+nice-model = { workspace = true, features = ["test-support"] }
 
+proptest = { workspace = true }
+rstest = { workspace = true }

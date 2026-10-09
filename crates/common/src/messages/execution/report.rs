@@ -1,29 +1,38 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : report.rs
-//  @Author       : dyntrait Created On 2026/1/5 16:10
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 use std::fmt::Display;
 
+use derive_builder::Builder;
 use nice_core::{Params, UUID4, UnixNanos};
-use nice_model::identifiers::{ClientId, ClientOrderId, InstrumentId, TraderId, Venue};
+use nice_model::identifiers::{
+    ClientId, ClientOrderId, InstrumentId, TraderId, Venue, VenueOrderId,
+};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+use crate::enums::LogLevel;
+
+const fn default_report_log_level() -> LogLevel {
+    LogLevel::Info
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Builder)]
 pub struct GenerateOrderStatusReport {
+    #[builder(default = "UUID4::new()")]
     pub command_id: UUID4,
     pub ts_init: UnixNanos,
+    #[builder(default)]
     pub instrument_id: Option<InstrumentId>,
+    #[builder(default)]
     pub client_order_id: Option<ClientOrderId>,
-    pub venue_order_id: Option<ClientOrderId>,
+    #[builder(default)]
+    pub venue_order_id: Option<VenueOrderId>,
+    #[builder(default)]
     pub params: Option<Params>,
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<UUID4>,
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub causation_id: Option<UUID4>,
 }
 
 impl GenerateOrderStatusReport {
@@ -33,7 +42,7 @@ impl GenerateOrderStatusReport {
         ts_init: UnixNanos,
         instrument_id: Option<InstrumentId>,
         client_order_id: Option<ClientOrderId>,
-        venue_order_id: Option<ClientOrderId>,
+        venue_order_id: Option<VenueOrderId>,
         params: Option<Params>,
         correlation_id: Option<UUID4>,
     ) -> Self {
@@ -45,6 +54,7 @@ impl GenerateOrderStatusReport {
             venue_order_id,
             params,
             correlation_id,
+            causation_id: None,
         }
     }
 }
@@ -63,20 +73,34 @@ impl Display for GenerateOrderStatusReport {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Builder)]
 pub struct GenerateOrderStatusReports {
+    #[builder(default = "UUID4::new()")]
     pub command_id: UUID4,
     pub ts_init: UnixNanos,
     pub open_only: bool,
+    #[builder(default)]
     pub instrument_id: Option<InstrumentId>,
+    #[builder(default)]
     pub start: Option<UnixNanos>,
+    #[builder(default)]
     pub end: Option<UnixNanos>,
+    #[builder(default)]
     pub params: Option<Params>,
+    /// The log level for receipt logging.
+    #[builder(default = "default_report_log_level()")]
+    #[serde(default = "default_report_log_level")]
+    pub log_receipt_level: LogLevel,
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<UUID4>,
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub causation_id: Option<UUID4>,
 }
 
 impl GenerateOrderStatusReports {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
         command_id: UUID4,
@@ -96,7 +120,9 @@ impl GenerateOrderStatusReports {
             start,
             end,
             params,
+            log_receipt_level: LogLevel::Info,
             correlation_id,
+            causation_id: None,
         }
     }
 }
@@ -114,26 +140,41 @@ impl Display for GenerateOrderStatusReports {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Builder)]
 pub struct GenerateFillReports {
+    #[builder(default = "UUID4::new()")]
     pub command_id: UUID4,
     pub ts_init: UnixNanos,
+    #[builder(default)]
     pub instrument_id: Option<InstrumentId>,
-    pub venue_order_id: Option<ClientOrderId>,
+    #[builder(default)]
+    pub venue_order_id: Option<VenueOrderId>,
+    #[builder(default)]
     pub start: Option<UnixNanos>,
+    #[builder(default)]
     pub end: Option<UnixNanos>,
+    #[builder(default)]
     pub params: Option<Params>,
+    /// The log level for receipt logging.
+    #[builder(default = "default_report_log_level()")]
+    #[serde(default = "default_report_log_level")]
+    pub log_receipt_level: LogLevel,
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<UUID4>,
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub causation_id: Option<UUID4>,
 }
 
 impl GenerateFillReports {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
         command_id: UUID4,
         ts_init: UnixNanos,
         instrument_id: Option<InstrumentId>,
-        venue_order_id: Option<ClientOrderId>,
+        venue_order_id: Option<VenueOrderId>,
         start: Option<UnixNanos>,
         end: Option<UnixNanos>,
         params: Option<Params>,
@@ -147,7 +188,9 @@ impl GenerateFillReports {
             start,
             end,
             params,
+            log_receipt_level: LogLevel::Info,
             correlation_id,
+            causation_id: None,
         }
     }
 }
@@ -165,15 +208,29 @@ impl Display for GenerateFillReports {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Builder)]
 pub struct GeneratePositionStatusReports {
+    #[builder(default = "UUID4::new()")]
     pub command_id: UUID4,
     pub ts_init: UnixNanos,
+    #[builder(default)]
     pub instrument_id: Option<InstrumentId>,
+    #[builder(default)]
     pub start: Option<UnixNanos>,
+    #[builder(default)]
     pub end: Option<UnixNanos>,
+    #[builder(default)]
     pub params: Option<Params>,
+    /// The log level for receipt logging.
+    #[builder(default = "default_report_log_level()")]
+    #[serde(default = "default_report_log_level")]
+    pub log_receipt_level: LogLevel,
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<UUID4>,
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub causation_id: Option<UUID4>,
 }
 
 impl GeneratePositionStatusReports {
@@ -194,7 +251,9 @@ impl GeneratePositionStatusReports {
             start,
             end,
             params,
+            log_receipt_level: LogLevel::Info,
             correlation_id,
+            causation_id: None,
         }
     }
 }
@@ -211,15 +270,23 @@ impl Display for GeneratePositionStatusReports {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Builder)]
 pub struct GenerateExecutionMassStatus {
     pub trader_id: TraderId,
     pub client_id: ClientId,
+    #[builder(default)]
     pub venue: Option<Venue>,
+    #[builder(default = "UUID4::new()")]
     pub command_id: UUID4,
     pub ts_init: UnixNanos,
+    #[builder(default)]
     pub params: Option<Params>,
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<UUID4>,
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub causation_id: Option<UUID4>,
 }
 
 impl GenerateExecutionMassStatus {
@@ -241,6 +308,7 @@ impl GenerateExecutionMassStatus {
             ts_init,
             params,
             correlation_id,
+            causation_id: None,
         }
     }
 }

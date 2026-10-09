@@ -1,0 +1,44 @@
+[package]
+name = "lighter-rust-data-client"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98.0"
+publish = false
+
+[workspace]
+
+[dependencies]
+dotenvy = "0.15"
+log = "0.4"
+tokio = { version = "1", default-features = false, features = [
+  "macros",
+  "rt-multi-thread",
+] }
+
+[dependencies.nice-common]
+git = "https://github.com/nautechsystems/nice_trader.git"
+branch = "develop"
+features = ["live"]
+
+[dependencies.nice-lighter]
+git = "https://github.com/nautechsystems/nice_trader.git"
+branch = "develop"
+default-features = false
+features = ["high-precision"]
+
+[dependencies.nice-live]
+git = "https://github.com/nautechsystems/nice_trader.git"
+branch = "develop"
+default-features = false
+features = ["node"]
+
+[dependencies.nice-model]
+git = "https://github.com/nautechsystems/nice_trader.git"
+branch = "develop"
+features = ["high-precision"]
+
+[dependencies.nice-testkit]
+git = "https://github.com/nautechsystems/nice_trader.git"
+branch = "develop"
+default-features = false
+features = ["testers", "high-precision"]

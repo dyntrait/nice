@@ -16,7 +16,7 @@ description = "the Nice trading engine"
 [dependencies]
 nice-common = {workspace = true}
 
-figment = {workspace = true}
+figment = {version = "0.10.19"}
 serde = {workspace = true}
 anyhow = {workspace = true}
 tracing = {workspace = true}

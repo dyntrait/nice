@@ -1,0 +1,72 @@
+[package]
+name = "nice-event-store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Event store and authoritative log of state-affecting messages for the nice trading engine"
+categories.workspace = true
+keywords.workspace = true
+documentation.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "nice_event_store"
+crate-type = ["rlib"]
+
+[features]
+default = []
+defi = ["nice-common/defi", "nice-model/defi", "nice-system/defi"]
+live = ["nice-common/live"]
+persistence = ["dep:nice-persistence"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+nice-common = { workspace = true, features = ["build-info-event-store"] }
+nice-core = { workspace = true }
+nice-execution = { workspace = true }
+nice-model = { workspace = true }
+nice-system = { workspace = true }
+
+nice-persistence = { workspace = true, optional = true }
+
+ahash = { workspace = true }
+anyhow = { workspace = true }
+blake3 = { workspace = true }
+bytes = { workspace = true }
+indexmap = { workspace = true }
+log = { workspace = true }
+parking_lot = { workspace = true }
+redb = { workspace = true }
+rmp-serde = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+ustr = { workspace = true }
+
+[dev-dependencies]
+nice-model = { workspace = true, features = ["test-support"] }
+
+async-trait = { workspace = true }
+criterion = { workspace = true }
+proptest = { workspace = true }
+redb = { workspace = true }
+rstest = { workspace = true }
+tempfile = { workspace = true }
+
+[[bench]]
+name = "hash"
+path = "benches/hash.rs"
+harness = false
+
+[[bench]]
+name = "codec"
+path = "benches/codec.rs"
+harness = false

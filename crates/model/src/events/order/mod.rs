@@ -1,15 +1,6 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2026  dyntrait  All rights reserved.
-//  All Rights Reserved
-//
-//  @File         : mod.rs
-//  @Author       : dyntrait
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
+
+use indexmap::IndexMap;
 use nice_core::{UUID4, UnixNanos};
 use rust_decimal::Decimal;
 use ustr::Ustr;
@@ -27,12 +18,16 @@ use crate::{
 };
 
 pub mod accepted;
+pub mod accepted_batch;
 pub mod any;
 pub mod cancel_rejected;
 pub mod canceled;
+pub mod canceled_batch;
 pub mod denied;
+pub mod denied_reason;
 pub mod emulated;
 pub mod expired;
+pub mod fill_voided;
 pub mod filled;
 pub mod initialized;
 pub mod modify_rejected;
@@ -42,10 +37,13 @@ pub mod rejected;
 pub mod released;
 pub mod snapshot;
 pub mod submitted;
+pub mod submitted_batch;
 pub mod triggered;
 pub mod updated;
 
-#[cfg(any(test, feature = "stubs"))]
+#[cfg(any(test, feature = "test-support"))]
+pub mod spec;
+#[cfg(any(test, feature = "test-support"))]
 pub mod stubs;
 
 /// Represents a type of [`OrderEvent`].
@@ -68,11 +66,12 @@ pub enum OrderEventType {
     Updated,
     PartiallyFilled,
     Filled,
+    FillVoided,
 }
 
 pub trait OrderEvent: 'static + Send {
     fn id(&self) -> UUID4;
-    fn kind(&self) -> &str;
+    fn type_name(&self) -> &'static str;
     fn order_type(&self) -> Option<OrderType>;
     fn order_side(&self) -> Option<OrderSide>;
     fn trader_id(&self) -> TraderId;
@@ -92,6 +91,7 @@ pub trait OrderEvent: 'static + Send {
     fn price(&self) -> Option<Price>;
     fn last_px(&self) -> Option<Price>;
     fn last_qty(&self) -> Option<Quantity>;
+    fn activation_price(&self) -> Option<Price>;
     fn trigger_price(&self) -> Option<Price>;
     fn trigger_type(&self) -> Option<TriggerType>;
     fn limit_offset(&self) -> Option<Decimal>;
@@ -106,11 +106,38 @@ pub trait OrderEvent: 'static + Send {
     fn linked_order_ids(&self) -> Option<Vec<ClientOrderId>>;
     fn parent_order_id(&self) -> Option<ClientOrderId>;
     fn exec_algorithm_id(&self) -> Option<ExecAlgorithmId>;
+    fn exec_algorithm_params(&self) -> Option<IndexMap<Ustr, Ustr>> {
+        None
+    }
     fn exec_spawn_id(&self) -> Option<ClientOrderId>;
+    fn tags(&self) -> Option<Vec<Ustr>> {
+        None
+    }
     fn venue_order_id(&self) -> Option<VenueOrderId>;
     fn account_id(&self) -> Option<AccountId>;
     fn position_id(&self) -> Option<PositionId>;
     fn commission(&self) -> Option<Money>;
     fn ts_event(&self) -> UnixNanos;
     fn ts_init(&self) -> UnixNanos;
+    fn causation_id(&self) -> Option<UUID4> {
+        None
+    }
+    fn released_price(&self) -> Option<Price> {
+        None
+    }
+    fn protection_price(&self) -> Option<Price> {
+        None
+    }
+    fn due_post_only(&self) -> bool {
+        false
+    }
+    fn correction_id(&self) -> Option<Ustr> {
+        None
+    }
+    fn is_reopened(&self) -> bool {
+        false
+    }
+    fn info(&self) -> Option<IndexMap<Ustr, Ustr>> {
+        None
+    }
 }

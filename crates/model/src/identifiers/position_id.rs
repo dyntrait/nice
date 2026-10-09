@@ -1,24 +1,15 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2025  dyntrait  All rights reserved.
-//  All Rights Reserved
-//
-//  @File         : position_id.rs
-//  @Author       : dyntrait
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 //! Represents a valid position ID.
 
 use std::{
-    fmt::{Debug, Display, Formatter},
+    fmt::{Debug, Display},
     hash::Hash,
 };
 
-use nice_core::correctness::{FAILED, check_valid_string_utf8};
+use nice_core::correctness::{
+    CorrectnessResult, CorrectnessResultExt, FAILED, check_valid_string_utf8,
+};
 use ustr::Ustr;
 
 /// Represents a valid position ID.
@@ -36,7 +27,7 @@ impl PositionId {
     /// # Notes
     ///
     /// PyO3 requires a `Result` type for proper error handling and stacktrace printing in Python.
-    pub fn new_checked<T: AsRef<str>>(value: T) -> anyhow::Result<Self> {
+    pub fn new_checked<T: AsRef<str>>(value: T) -> CorrectnessResult<Self> {
         let value = value.as_ref();
         check_valid_string_utf8(value, stringify!(value))?;
         Ok(Self(Ustr::from(value)))
@@ -48,11 +39,12 @@ impl PositionId {
     ///
     /// Panics if `value` is not a valid string.
     pub fn new<T: AsRef<str>>(value: T) -> Self {
-        Self::new_checked(value).expect(FAILED)
+        Self::new_checked(value).expect_display(FAILED)
     }
 
     /// Sets the inner identifier value.
-    pub fn set_inner(&mut self, value: &str) {
+    #[cfg_attr(not(feature = "python"), allow(dead_code))]
+    pub(crate) fn set_inner(&mut self, value: &str) {
         self.0 = Ustr::from(value);
     }
 
@@ -78,12 +70,12 @@ impl PositionId {
 }
 
 impl Debug for PositionId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.0)
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "\"{}\"", self.0)
     }
 }
 impl Display for PositionId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
@@ -99,5 +91,42 @@ mod tests {
     fn test_string_reprs(position_id_test: PositionId) {
         assert_eq!(position_id_test.as_str(), "P-123456789");
         assert_eq!(format!("{position_id_test}"), "P-123456789");
+    }
+
+    #[rstest]
+    #[case("P-123456789", true)]
+    #[case("P-", true)]
+    #[case("VENUE-P-123456789", false)]
+    #[case("P123456789", false)]
+    fn test_is_virtual(#[case] value: &str, #[case] expected: bool) {
+        assert_eq!(PositionId::new(value).is_virtual(), expected);
+    }
+
+    #[rstest]
+    #[should_panic(expected = "Condition failed: invalid string for 'value', was empty")]
+    fn test_new_with_empty_string_panics_with_display_format() {
+        let _ = PositionId::new("");
+    }
+
+    #[rstest]
+    fn test_deserialize_json_with_unicode_escapes() {
+        let id: PositionId = serde_json::from_str(r#""P-\u9f99\u867e-1""#).unwrap();
+        assert_eq!(id.as_str(), "P-\u{9f99}\u{867e}-1");
+    }
+
+    #[rstest]
+    fn test_serialization_roundtrip_non_ascii() {
+        let id = PositionId::new("P-\u{9f99}\u{867e}-1");
+        let json = serde_json::to_string(&id).unwrap();
+        assert_eq!(json, "\"P-\u{9f99}\u{867e}-1\"");
+
+        let deserialized: PositionId = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, id);
+    }
+
+    #[rstest]
+    fn test_deserialize_rejects_empty_string() {
+        let result: Result<PositionId, _> = serde_json::from_str(r#""""#);
+        assert!(result.is_err());
     }
 }

@@ -1,14 +1,4 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : swap_trade_info.rs.rs
-//  @Author       : dyntrait Created On 2026/1/5 14:34
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 use alloy_primitives::{U160, U256};
 use rust_decimal::prelude::ToPrimitive;
@@ -19,7 +9,8 @@ use crate::{
         Token,
         data::swap::RawSwapData,
         tick_map::{
-            full_math::FullMath, sqrt_price_math::decode_sqrt_price_x96_to_price_tokens_adjusted,
+            full_math::{DECIMAL_EXPONENT_MAX, FullMath},
+            sqrt_price_math::{decode_sqrt_price_x96_to_price_tokens_adjusted, price_from_u256},
         },
     },
     enums::OrderSide,
@@ -44,7 +35,7 @@ use crate::{
 ///
 /// # Prices
 ///
-/// - `spot_price`: Instantaneous pool price after the swap (from sqrt_price_x96)
+/// - `spot_price`: Instantaneous pool price after the swap (from `sqrt_price_x96`)
 /// - `execution_price`: Average realized price for this swap (from amount ratio)
 ///
 /// Both prices are in quote/base direction (e.g., USDC per WETH) and adjusted for token decimals.
@@ -82,9 +73,11 @@ impl SwapTradeInfo {
     /// Price impact in basis points (10000 = 100%)
     ///
     /// # Errors
-    /// Returns error if price calculations fail
+    ///
+    /// Returns an error if the spot price before the swap is not set or is zero.
     pub fn get_price_impact_bps(&self) -> anyhow::Result<u32> {
         if let Some(spot_price_before) = self.spot_price_before {
+            Self::check_spot_price_before(spot_price_before, PriceMetric::Impact)?;
             let price_change = self.spot_price - spot_price_before;
             let price_impact =
                 (price_change.as_decimal() / spot_price_before.as_decimal()).abs() * dec!(10_000);
@@ -105,9 +98,11 @@ impl SwapTradeInfo {
     /// Total slippage in basis points (10000 = 100%)
     ///
     /// # Errors
-    /// Returns error if price calculations fail
+    ///
+    /// Returns an error if the spot price before the swap is not set or is zero.
     pub fn get_slippage_bps(&self) -> anyhow::Result<u32> {
         if let Some(spot_price_before) = self.spot_price_before {
+            Self::check_spot_price_before(spot_price_before, PriceMetric::Slippage)?;
             let price_change = self.execution_price - spot_price_before;
             let slippage =
                 (price_change.as_decimal() / spot_price_before.as_decimal()).abs() * dec!(10_000);
@@ -115,6 +110,32 @@ impl SwapTradeInfo {
             Ok(slippage.round().to_u32().unwrap_or(0))
         } else {
             anyhow::bail!("Cannot calculate slippage, the spot price before is not set")
+        }
+    }
+
+    fn check_spot_price_before(
+        spot_price_before: Price,
+        metric: PriceMetric,
+    ) -> anyhow::Result<()> {
+        let metric = metric.name();
+        anyhow::ensure!(
+            !spot_price_before.is_zero(),
+            "Cannot calculate {metric}, the spot price before is zero"
+        );
+        Ok(())
+    }
+}
+
+enum PriceMetric {
+    Impact,
+    Slippage,
+}
+
+impl PriceMetric {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Impact => "price impact",
+            Self::Slippage => "slippage",
         }
     }
 }
@@ -132,7 +153,7 @@ impl SwapTradeInfo {
 /// # Precision Handling
 ///
 /// For tokens with more than 16 decimals, quantities and prices are automatically
-/// scaled down to MAX_FLOAT_PRECISION (16) to ensure safe f64 conversion while
+/// scaled down to `MAX_FLOAT_PRECISION` (16) to ensure safe f64 conversion while
 /// maintaining reasonable precision for practical trading purposes.
 #[derive(Debug)]
 pub struct SwapTradeInfoCalculator<'a> {
@@ -150,19 +171,21 @@ pub struct SwapTradeInfoCalculator<'a> {
 }
 
 impl<'a> SwapTradeInfoCalculator<'a> {
+    #[must_use]
     pub fn new(token0: &'a Token, token1: &'a Token, raw_swap_data: RawSwapData) -> Self {
         let is_inverted = token0.get_token_priority() < token1.get_token_priority();
         Self {
             token0,
             token1,
-            raw_swap_data,
             is_inverted,
+            raw_swap_data,
         }
     }
 
     /// Determines swap direction from amount signs.
     ///
-    /// Returns `true` if swapping token0 for token1 (zero_for_one).
+    /// Returns `true` if swapping token0 for token1 (`zero_for_one`).
+    #[must_use]
     pub fn zero_for_one(&self) -> bool {
         self.raw_swap_data.amount0.is_positive()
     }
@@ -180,7 +203,9 @@ impl<'a> SwapTradeInfoCalculator<'a> {
     ///
     /// # Errors
     ///
-    /// Returns an error if quantity or price calculations fail.
+    /// Returns an error if:
+    /// - A token decimal count exceeds `DECIMAL_EXPONENT_MAX` (77).
+    /// - A quantity or price calculation fails.
     pub fn compute(&self, sqrt_price_x96_before: Option<U160>) -> anyhow::Result<SwapTradeInfo> {
         let spot_price_before = if let Some(sqrt_price_x96_before) = sqrt_price_x96_before {
             Some(decode_sqrt_price_x96_to_price_tokens_adjusted(
@@ -217,8 +242,10 @@ impl<'a> SwapTradeInfoCalculator<'a> {
     /// The order side depends on:
     /// 1. Which token is being bought/sold (from amount signs)
     /// 2. Which token is base vs quote (from priority determination)
+    #[must_use]
     pub fn order_side(&self) -> OrderSide {
         let zero_for_one = self.zero_for_one();
+
         if self.is_inverted {
             // When inverted: token0=quote, token1=base
             // - zero_for_one (sell token0/quote, buy token1/base) -> BUY base
@@ -264,7 +291,7 @@ impl<'a> SwapTradeInfoCalculator<'a> {
             )
         };
 
-        Quantity::from_u256(amount, precision)
+        Quantity::from_u256(amount, precision).map_err(Into::into)
     }
 
     /// Returns the quantity of the quote token involved in the swap.
@@ -291,7 +318,7 @@ impl<'a> SwapTradeInfoCalculator<'a> {
             )
         };
 
-        Quantity::from_u256(amount, precision)
+        Quantity::from_u256(amount, precision).map_err(Into::into)
     }
 
     /// Returns the human-readable spot price in base/quote (market) convention.
@@ -303,8 +330,8 @@ impl<'a> SwapTradeInfoCalculator<'a> {
     /// Price adjusted for token decimals in quote/base direction (market convention).
     ///
     /// # Base/Quote Logic
-    /// - When is_inverted=false: token0=base, token1=quote → returns token1/token0 (quote/base)
-    /// - When is_inverted=true: token0=quote, token1=base → returns token0/token1 (quote/base)
+    /// - When `is_inverted=false`: token0=base, token1=quote → returns token1/token0 (quote/base)
+    /// - When `is_inverted=true`: token0=quote, token1=base → returns token0/token1 (quote/base)
     ///
     /// # Use Cases
     /// - Displaying current market price to users
@@ -337,14 +364,14 @@ impl<'a> SwapTradeInfoCalculator<'a> {
     ///       = (quote_amount * 10^base_decimals) / (base_amount * 10^quote_decimals)
     /// ```
     ///
-    /// To preserve precision in U256 arithmetic, we scale by 10^FIXED_PRECISION:
+    /// To preserve precision in U256 arithmetic, we scale by `10^FIXED_PRECISION`:
     /// ```text
     /// price_raw = (quote_amount * 10^base_decimals * 10^FIXED_PRECISION) / (base_amount * 10^quote_decimals)
     /// ```
     ///
     /// # Base/Quote Logic
-    /// - When is_inverted=false: quote=token1, base=token0 → price = amount1/amount0
-    /// - When is_inverted=true: quote=token0, base=token1 → price = amount0/amount1
+    /// - When `is_inverted=false`: quote=token1, base=token0 → price = amount1/amount0
+    /// - When `is_inverted=true`: quote=token0, base=token1 → price = amount0/amount1
     ///
     /// # Use Cases
     /// - Trade accounting and P&L calculation
@@ -368,36 +395,32 @@ impl<'a> SwapTradeInfoCalculator<'a> {
             (amount1, amount0, self.token1.decimals, self.token0.decimals)
         };
 
-        // Create decimal scalars
-        let base_decimals_scalar = U256::from(10u128.pow(base_decimals as u32));
-        let quote_decimals_scalar = U256::from(10u128.pow(quote_decimals as u32));
-        let fixed_scalar = U256::from(10u128.pow(FIXED_PRECISION as u32));
+        FullMath::check_decimal_exponent(base_decimals)?;
+        FullMath::check_decimal_exponent(quote_decimals)?;
 
-        // Calculate: (quote_amount * 10^base_decimals * 10^FIXED_PRECISION) / (base_amount * 10^quote_decimals)
-        // Use FullMath::mul_div to handle large intermediate values safely
+        let exponent =
+            i16::from(base_decimals) + i16::from(FIXED_PRECISION) - i16::from(quote_decimals);
+        let price_raw_u256 = if exponent >= 0 {
+            let exponent = u8::try_from(exponent)
+                .map_err(|_| anyhow::anyhow!("Decimal exponent {exponent} exceeds u8 range"))?;
+            let primary_exponent = exponent.min(DECIMAL_EXPONENT_MAX);
+            let secondary_exponent = exponent - primary_exponent;
+            let primary_scalar = FullMath::pow10(primary_exponent)?;
+            let secondary_scalar = FullMath::pow10(secondary_exponent)?;
+            FullMath::mul_div_scaled(
+                quote_amount,
+                U256::from(1),
+                base_amount,
+                &[primary_scalar, secondary_scalar],
+            )?
+        } else {
+            let divisor_exponent = u8::try_from(exponent.unsigned_abs())
+                .map_err(|_| anyhow::anyhow!("Decimal exponent {exponent} exceeds u8 range"))?;
+            let divisor = FullMath::pow10(divisor_exponent)?;
+            (quote_amount / base_amount) / divisor
+        };
 
-        // Step 1: numerator = quote_amount * 10^base_decimals
-        let numerator_step1 = FullMath::mul_div(quote_amount, base_decimals_scalar, U256::from(1))?;
-
-        // Step 2: numerator = (quote_amount * 10^base_decimals) * 10^FIXED_PRECISION
-        let numerator_final = FullMath::mul_div(numerator_step1, fixed_scalar, U256::from(1))?;
-
-        // Step 3: denominator = base_amount * 10^quote_decimals
-        let denominator = FullMath::mul_div(base_amount, quote_decimals_scalar, U256::from(1))?;
-
-        // Step 4: Final division
-        let price_raw_u256 = FullMath::mul_div(numerator_final, U256::from(1), denominator)?;
-
-        // Convert to PriceRaw (i128)
-        anyhow::ensure!(
-            price_raw_u256 <= U256::from(i128::MAX as u128),
-            "Price overflow: {price_raw_u256} exceeds i128::MAX"
-        );
-
-        let price_raw = price_raw_u256.to::<i128>();
-
-        // price_raw is at FIXED_PRECISION scale, which is what Price expects
-        Ok(Price::from_raw(price_raw, FIXED_PRECISION))
+        price_from_u256(price_raw_u256)
     }
 }
 
@@ -406,11 +429,67 @@ mod tests {
     use std::str::FromStr;
 
     use alloy_primitives::{I256, U160};
-    use rstest::rstest;
+    use rstest::{fixture, rstest};
     use rust_decimal_macros::dec;
 
     use super::*;
-    use crate::defi::stubs::{usdc, weth};
+    use crate::defi::{
+        stubs::{usdc, weth},
+        tick_map::{full_math::Q96_U160, tick_math::MAX_SQRT_RATIO},
+    };
+
+    #[fixture]
+    fn swap_trade_info() -> SwapTradeInfo {
+        SwapTradeInfo {
+            order_side: OrderSide::Buy,
+            quantity_base: Quantity::from("1"),
+            quantity_quote: Quantity::from("2"),
+            spot_price: Price::from_raw(2, FIXED_PRECISION),
+            execution_price: Price::from_raw(3, FIXED_PRECISION),
+            is_inverted: true,
+            spot_price_before: Some(Price::from_raw(1, FIXED_PRECISION)),
+        }
+    }
+
+    #[rstest]
+    fn test_get_price_impact_bps_rejects_zero_spot_price_before(
+        mut swap_trade_info: SwapTradeInfo,
+    ) {
+        swap_trade_info.spot_price_before = Some(Price::zero(FIXED_PRECISION));
+
+        let error = swap_trade_info.get_price_impact_bps().unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Cannot calculate price impact, the spot price before is zero"
+        );
+    }
+
+    #[rstest]
+    fn test_get_slippage_bps_rejects_zero_spot_price_before(mut swap_trade_info: SwapTradeInfo) {
+        swap_trade_info.spot_price_before = Some(Price::zero(FIXED_PRECISION));
+
+        let error = swap_trade_info.get_slippage_bps().unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Cannot calculate slippage, the spot price before is zero"
+        );
+    }
+
+    #[rstest]
+    fn test_get_price_impact_bps_accepts_smallest_positive_spot_price_before(
+        swap_trade_info: SwapTradeInfo,
+    ) {
+        assert_eq!(swap_trade_info.get_price_impact_bps().unwrap(), 10_000);
+    }
+
+    #[rstest]
+    fn test_get_slippage_bps_accepts_smallest_positive_spot_price_before(
+        swap_trade_info: SwapTradeInfo,
+    ) {
+        assert_eq!(swap_trade_info.get_slippage_bps().unwrap(), 20_000);
+    }
 
     #[rstest]
     fn test_swap_trade_info_calculator_calculations_buy(weth: Token, usdc: Token) {
@@ -461,6 +540,109 @@ mod tests {
         assert_eq!(
             result.execution_price.as_decimal(),
             dec!(3576.5947980503469024)
+        );
+    }
+
+    #[rstest]
+    fn test_swap_trade_info_calculator_spot_price_overflow_is_recoverable(
+        weth: Token,
+        usdc: Token,
+    ) {
+        // A near-MAX_SQRT_RATIO swap overflows spot-price decoding, so compute must return a
+        // recoverable error rather than panic, letting the sync keep the swap with empty metadata.
+        let raw_data = RawSwapData::new(
+            I256::from_str("1").unwrap(),
+            I256::from_str("-1").unwrap(),
+            MAX_SQRT_RATIO - U160::from(1),
+        );
+
+        let calculator = SwapTradeInfoCalculator::new(&weth, &usdc, raw_data);
+
+        assert!(calculator.compute(None).is_err());
+    }
+
+    #[rstest]
+    fn test_execution_price_scales_distinct_decimals_in_both_directions(weth: Token, usdc: Token) {
+        let normal_data = RawSwapData::new(
+            I256::from_str("-2000000000000000000").unwrap(),
+            I256::from_str("5000000").unwrap(),
+            Q96_U160,
+        );
+        let inverted_data = RawSwapData::new(
+            I256::from_str("5000000").unwrap(),
+            I256::from_str("-2000000000000000000").unwrap(),
+            Q96_U160,
+        );
+
+        let normal = SwapTradeInfoCalculator::new(&weth, &usdc, normal_data)
+            .execution_price()
+            .unwrap();
+        let inverted = SwapTradeInfoCalculator::new(&usdc, &weth, inverted_data)
+            .execution_price()
+            .unwrap();
+        let expected = Price::from_raw(25_000_000_000_000_000, FIXED_PRECISION);
+
+        assert_eq!(normal, expected);
+        assert_eq!(inverted, expected);
+    }
+
+    #[rstest]
+    fn test_execution_price_scales_negative_net_exponent(mut weth: Token, mut usdc: Token) {
+        weth.decimals = 0;
+        usdc.decimals = 18;
+        let raw_data = RawSwapData::new(
+            I256::from_str("1").unwrap(),
+            I256::from_str("-100").unwrap(),
+            Q96_U160,
+        );
+
+        let result = SwapTradeInfoCalculator::new(&weth, &usdc, raw_data)
+            .execution_price()
+            .unwrap();
+
+        assert_eq!(result, Price::from_raw(1, FIXED_PRECISION));
+    }
+
+    #[rstest]
+    fn test_execution_price_accepts_largest_decimal_exponent(mut weth: Token, mut usdc: Token) {
+        weth.decimals = DECIMAL_EXPONENT_MAX;
+        usdc.decimals = 0;
+        let raw_data = RawSwapData::new(
+            I256::from_raw(FullMath::pow10(76).unwrap()),
+            I256::from_str("-1").unwrap(),
+            Q96_U160,
+        );
+
+        let result = SwapTradeInfoCalculator::new(&weth, &usdc, raw_data)
+            .execution_price()
+            .unwrap();
+
+        assert_eq!(
+            result,
+            Price::from_raw(100_000_000_000_000_000, FIXED_PRECISION)
+        );
+    }
+
+    #[rstest]
+    fn test_execution_price_rejects_first_unsupported_decimal_exponent(
+        mut weth: Token,
+        mut usdc: Token,
+    ) {
+        weth.decimals = DECIMAL_EXPONENT_MAX + 1;
+        usdc.decimals = 0;
+        let raw_data = RawSwapData::new(
+            I256::from_str("1").unwrap(),
+            I256::from_str("-1").unwrap(),
+            Q96_U160,
+        );
+
+        let error = SwapTradeInfoCalculator::new(&weth, &usdc, raw_data)
+            .execution_price()
+            .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Decimal exponent 78 exceeds supported maximum 77"
         );
     }
 }

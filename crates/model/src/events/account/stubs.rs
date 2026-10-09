@@ -1,15 +1,4 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2026  dyntrait  All rights reserved.
-//  All Rights Reserved
-//
-//  @File         : stubs.rs
-//  @Author       : dyntrait
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 use nice_core::UUID4;
 use rstest::fixture;
@@ -132,6 +121,44 @@ pub fn cash_account_state_multi_changed_btc() -> AccountState {
 }
 
 #[fixture]
+pub fn betting_account_state() -> AccountState {
+    AccountState::new(
+        account_id(),
+        AccountType::Betting,
+        vec![AccountBalance::new(
+            Money::from("1000 GBP"),
+            Money::from("0 GBP"),
+            Money::from("1000 GBP"),
+        )],
+        vec![],
+        true,
+        uuid4(),
+        0.into(),
+        0.into(),
+        Some(Currency::GBP()),
+    )
+}
+
+#[fixture]
+pub fn betting_account_state_changed() -> AccountState {
+    AccountState::new(
+        account_id(),
+        AccountType::Betting,
+        vec![AccountBalance::new(
+            Money::from("900 GBP"),
+            Money::from("50 GBP"),
+            Money::from("850 GBP"),
+        )],
+        vec![],
+        true,
+        uuid4(),
+        0.into(),
+        0.into(),
+        Some(Currency::GBP()),
+    )
+}
+
+#[fixture]
 pub fn margin_account_state() -> AccountState {
     AccountState::new(
         account_id(),
@@ -143,5 +170,55 @@ pub fn margin_account_state() -> AccountState {
         0.into(),
         0.into(),
         Some(Currency::USD()),
+    )
+}
+
+#[fixture]
+pub fn wallet_account_state() -> AccountState {
+    let eth_account_balance = AccountBalance::new(
+        Money::from("10 ETH"),
+        Money::from("0 ETH"),
+        Money::from("10 ETH"),
+    );
+    let usdc_account_balance = AccountBalance::new(
+        Money::from("25000 USDC"),
+        Money::from("0 USDC"),
+        Money::from("25000 USDC"),
+    );
+    AccountState::new(
+        account_id(),
+        AccountType::Wallet,
+        vec![eth_account_balance, usdc_account_balance],
+        vec![],
+        true,
+        uuid4(),
+        0.into(),
+        0.into(),
+        None, // multi-currency wallet account
+    )
+}
+
+#[fixture]
+pub fn wallet_account_state_changed() -> AccountState {
+    let eth_account_balance = AccountBalance::new(
+        Money::from("9.5 ETH"),
+        Money::from("0 ETH"),
+        Money::from("9.5 ETH"),
+    );
+    let usdc_account_balance = AccountBalance::new(
+        Money::from("30000 USDC"),
+        Money::from("0 USDC"),
+        Money::from("30000 USDC"),
+    );
+    AccountState::new(
+        account_id(),
+        AccountType::Wallet,
+        vec![eth_account_balance, usdc_account_balance],
+        vec![],
+        true,
+        UUID4::new(),
+        0.into(),
+        0.into(),
+        None, // multi-currency wallet account
     )
 }

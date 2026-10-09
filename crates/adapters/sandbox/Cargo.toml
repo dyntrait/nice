@@ -1,0 +1,77 @@
+[package]
+name = "nice-sandbox"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Sandbox execution adapter for the nice trading engine"
+categories.workspace = true
+keywords.workspace = true
+documentation.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "nice_sandbox"
+crate-type = ["rlib"]
+
+[features]
+default = ["high-precision"]
+
+
+high-precision = ["nice-model/high-precision"]
+example-databento = [
+  "dep:nice-databento",
+  "dep:nice-live",
+  "dep:dotenvy",
+  "nice-live/node",
+]
+
+[package.metadata.docs.rs]
+# Python docs depend on the local pyo3-stub-gen patch for now, which published crates do not carry
+features = ["example-databento", "high-precision"]
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+nice-common = { workspace = true, features = ["live"] }
+nice-core = { workspace = true }
+nice-execution = { workspace = true }
+nice-model = { workspace = true }
+nice-system = { workspace = true, optional = true }
+
+ahash = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+bon = { workspace = true }
+log = { workspace = true }
+rust_decimal = { workspace = true }
+serde = { workspace = true }
+ustr = { workspace = true }
+
+nice-databento = { workspace = true, features = ["live"], optional = true }
+nice-live = { workspace = true, optional = true }
+
+dotenvy = { workspace = true, optional = true }
+pyo3 = { workspace = true, optional = true }
+pyo3-stub-gen = { workspace = true, optional = true }
+
+[dev-dependencies]
+nice-data = { workspace = true }
+nice-testkit = { workspace = true, default-features = false, features = [
+  "testers",
+] }
+nice-trading = { workspace = true }
+
+rstest = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }
+
+[[example]]
+name = "databento-cme-sandbox"
+path = "examples/databento_cme.rs"
+required-features = ["example-databento"]
+doc = false

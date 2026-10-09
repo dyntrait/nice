@@ -1,17 +1,6 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2025  Dyntrait  All rights reserved.
-//  All Rights Reserved
-//
-//  @File         : stubs.rs
-//  @Author       : dyntrait
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
 
-//! Helper functions for stubbing identifiers in tests.
+
+//! Identifier stubs for tests.
 
 use nice_core::UUID4;
 use rstest::fixture;
@@ -20,7 +9,6 @@ use super::{
     AccountId, ClientId, ClientOrderId, ComponentId, ExecAlgorithmId, InstrumentId, OrderListId,
     PositionId, StrategyId, Symbol, TradeId, TraderId, Venue, VenueOrderId,
 };
-
 use crate::stubs::TestDefault;
 
 impl TestDefault for AccountId {
@@ -103,7 +91,7 @@ impl TestDefault for InstrumentId {
 /// Returns a stub trader ID.
 #[fixture]
 pub fn trader_id() -> TraderId {
-    TraderId::new("TRADER-001")
+    TraderId::test_default()
 }
 
 /// Returns a stub strategy ID for an EMA cross strategy.
@@ -121,25 +109,25 @@ pub fn uuid4() -> UUID4 {
 /// Returns a stub account ID.
 #[fixture]
 pub fn account_id() -> AccountId {
-    AccountId::new("SIM-001")
+    AccountId::test_default()
 }
 
 /// Returns a stub client order ID.
 #[fixture]
 pub fn client_order_id() -> ClientOrderId {
-    ClientOrderId::new("O-19700101-000000-001-001-1")
+    ClientOrderId::test_default()
 }
 
 /// Returns a stub venue order ID.
 #[fixture]
 pub fn venue_order_id() -> VenueOrderId {
-    VenueOrderId::new("001")
+    VenueOrderId::test_default()
 }
 
 /// Returns a stub position ID.
 #[fixture]
 pub fn position_id() -> PositionId {
-    PositionId::new("P-001")
+    PositionId::test_default()
 }
 
 /// Returns a stub instrument ID for BTC/USDT.

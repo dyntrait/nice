@@ -1,24 +1,19 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : dex.rs
-//  @Author       : dyntrait Created On 2026/1/5 14:49
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 use std::{borrow::Cow, fmt::Display, str::FromStr, sync::Arc};
 
 use alloy_primitives::{Address, keccak256};
+use nice_core::{
+    correctness::{CorrectnessError, CorrectnessResultExt, FAILED},
+    hex,
+};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
 use crate::{
     defi::{amm::Pool, chain::Chain, validation::validate_address},
-    identifiers::{InstrumentId, Symbol, Venue},
+    enums::CurrencyType,
     instruments::{Instrument, any::InstrumentAny, currency_pair::CurrencyPair},
     types::{currency::Currency, fixed::FIXED_PRECISION, price::Price, quantity::Quantity},
 };
@@ -28,14 +23,26 @@ use crate::{
     Debug,
     Clone,
     Copy,
+    Hash,
     PartialEq,
+    Eq,
     Serialize,
     Deserialize,
     strum::EnumString,
     strum::Display,
     strum::EnumIter,
 )]
-#[cfg_attr(feature = "python", pyo3::pyclass(module = "nautilus_trader.model"))]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(
+        frozen,
+        eq,
+        eq_int,
+        module = "nice_trader.model",
+        from_py_object,
+        rename_all = "SCREAMING_SNAKE_CASE",
+    )
+)]
 #[cfg_attr(feature = "python", pyo3_stub_gen::derive::gen_stub_pyclass_enum)]
 #[non_exhaustive]
 pub enum AmmType {
@@ -45,7 +52,7 @@ pub enum AmmType {
     CLAMM,
     /// Concentrated liquidity AMM **with hooks** (e.g. upcoming Uniswap v4).
     CLAMEnhanced,
-    /// Specialized Constant-Sum AMM for low-volatility assets (Curve-style “StableSwap”).
+    /// Specialized Constant-Sum AMM for low-volatility assets (Curve-style "`StableSwap`").
     StableSwap,
     /// AMM with customizable token weights (e.g., Balancer style).
     WeightedPool,
@@ -53,7 +60,7 @@ pub enum AmmType {
     ComposablePool,
 }
 
-/// Represents different types of decentralized exchanges (DEXes) supported by Nautilus.
+/// Represents different types of decentralized exchanges (DEXes) supported by nice.
 #[derive(
     Debug,
     Clone,
@@ -69,7 +76,17 @@ pub enum AmmType {
     Serialize,
     Deserialize,
 )]
-#[cfg_attr(feature = "python", pyo3::pyclass(module = "nautilus_trader.model"))]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(
+        frozen,
+        eq,
+        eq_int,
+        module = "nice_trader.model",
+        from_py_object,
+        rename_all = "SCREAMING_SNAKE_CASE",
+    )
+)]
 #[cfg_attr(feature = "python", pyo3_stub_gen::derive::gen_stub_pyclass_enum)]
 pub enum DexType {
     AerodromeSlipstream,
@@ -93,6 +110,7 @@ pub enum DexType {
 
 impl DexType {
     /// Returns a reference to the `DexType` corresponding to the given dex name, or `None` if it is not found.
+    #[must_use]
     pub fn from_dex_name(dex_name: &str) -> Option<Self> {
         Self::from_str(dex_name).ok()
     }
@@ -100,7 +118,10 @@ impl DexType {
 
 /// Represents a decentralized exchange (DEX) in a blockchain ecosystem.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "python", pyo3::pyclass(module = "nautilus_trader.model"))]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nice_trader.model", from_py_object)
+)]
 #[cfg_attr(feature = "python", pyo3_stub_gen::derive::gen_stub_pyclass)]
 pub struct Dex {
     /// The blockchain network where this DEX operates.
@@ -125,6 +146,10 @@ pub struct Dex {
     pub collect_created_event: Cow<'static, str>,
     // Optional Flash event signature emitted when flash loan occurs.
     pub flash_created_event: Option<Cow<'static, str>>,
+    // Optional SetFeeProtocol event signature emitted when the protocol-fee config changes.
+    pub fee_protocol_update_event: Option<Cow<'static, str>>,
+    // Optional CollectProtocol event signature emitted when protocol fees are withdrawn.
+    pub fee_protocol_collect_event: Option<Cow<'static, str>>,
     /// The type of automated market maker (AMM) algorithm used by this DEX.
     pub amm_type: AmmType,
     /// Collection of liquidity pools managed by this DEX.
@@ -142,7 +167,7 @@ impl Dex {
     ///
     /// Panics if the provided factory address is invalid.
     #[must_use]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         chain: Chain,
         name: DexType,
@@ -155,31 +180,12 @@ impl Dex {
         burn_event: &str,
         collect_event: &str,
     ) -> Self {
-        let pool_created_event_hash = keccak256(pool_created_event.as_bytes());
-        let encoded_pool_created_event = format!(
-            "0x{encoded_hash}",
-            encoded_hash = hex::encode(pool_created_event_hash)
-        );
-        let swap_event_hash: alloy_primitives::FixedBytes<32> = keccak256(swap_event.as_bytes());
-        let encoded_swap_event = format!(
-            "0x{encoded_hash}",
-            encoded_hash = hex::encode(swap_event_hash)
-        );
-        let mint_event_hash = keccak256(mint_event.as_bytes());
-        let encoded_mint_event = format!(
-            "0x{encoded_hash}",
-            encoded_hash = hex::encode(mint_event_hash)
-        );
-        let burn_event_hash = keccak256(burn_event.as_bytes());
-        let encoded_burn_event = format!(
-            "0x{encoded_hash}",
-            encoded_hash = hex::encode(burn_event_hash)
-        );
-        let collect_event_hash = keccak256(collect_event.as_bytes());
-        let encoded_collect_event = format!(
-            "0x{encoded_hash}",
-            encoded_hash = hex::encode(collect_event_hash)
-        );
+        let encoded_pool_created_event =
+            hex::encode_prefixed(keccak256(pool_created_event.as_bytes()));
+        let encoded_swap_event = hex::encode_prefixed(keccak256(swap_event.as_bytes()));
+        let encoded_mint_event = hex::encode_prefixed(keccak256(mint_event.as_bytes()));
+        let encoded_burn_event = hex::encode_prefixed(keccak256(burn_event.as_bytes()));
+        let encoded_collect_event = hex::encode_prefixed(keccak256(collect_event.as_bytes()));
         let factory_address = match validate_address(factory) {
             Ok(address) => address,
             Err(e) => panic!(
@@ -198,34 +204,39 @@ impl Dex {
             burn_created_event: encoded_burn_event.into(),
             collect_created_event: encoded_collect_event.into(),
             flash_created_event: None,
+            fee_protocol_update_event: None,
+            fee_protocol_collect_event: None,
             amm_type,
             pairs: vec![],
         }
     }
 
     /// Returns a unique identifier for this DEX, combining chain and protocol name.
+    #[must_use]
     pub fn id(&self) -> String {
         format!("{}:{}", self.chain.name, self.name)
     }
 
     /// Sets the pool initialization event signature by hashing and encoding the provided event string.
     pub fn set_initialize_event(&mut self, event: &str) {
-        let initialize_event_hash = keccak256(event.as_bytes());
-        let encoded_initialized_event = format!(
-            "0x{encoded_hash}",
-            encoded_hash = hex::encode(initialize_event_hash)
-        );
-        self.initialize_event = Some(encoded_initialized_event.into());
+        self.initialize_event = Some(hex::encode_prefixed(keccak256(event.as_bytes())).into());
     }
 
     /// Sets the flash loan event signature by hashing and encoding the provided event string.
     pub fn set_flash_event(&mut self, event: &str) {
-        let flash_event_hash = keccak256(event.as_bytes());
-        let encoded_flash_event = format!(
-            "0x{encoded_hash}",
-            encoded_hash = hex::encode(flash_event_hash)
-        );
-        self.flash_created_event = Some(encoded_flash_event.into());
+        self.flash_created_event = Some(hex::encode_prefixed(keccak256(event.as_bytes())).into());
+    }
+
+    /// Sets the protocol-fee change event signature by hashing and encoding the provided event string.
+    pub fn set_fee_protocol_update_event(&mut self, event: &str) {
+        self.fee_protocol_update_event =
+            Some(hex::encode_prefixed(keccak256(event.as_bytes())).into());
+    }
+
+    /// Sets the protocol-fee withdrawal event signature by hashing and encoding the provided event string.
+    pub fn set_fee_protocol_collect_event(&mut self, event: &str) {
+        self.fee_protocol_collect_event =
+            Some(hex::encode_prefixed(keccak256(event.as_bytes())).into());
     }
 }
 
@@ -235,41 +246,63 @@ impl Display for Dex {
     }
 }
 
-impl From<Pool> for CurrencyPair {
-    fn from(p: Pool) -> Self {
-        let symbol = Symbol::from(format!("{}/{}", p.token0.symbol, p.token1.symbol));
-        let id = InstrumentId::new(symbol, Venue::from(p.dex.id()));
+impl TryFrom<&Pool> for CurrencyPair {
+    type Error = CorrectnessError;
 
+    fn try_from(p: &Pool) -> Result<Self, Self::Error> {
         let size_precision = p.token0.decimals.min(FIXED_PRECISION);
         let price_precision = p.token1.decimals.min(FIXED_PRECISION);
 
-        let price_increment = Price::new(10f64.powi(-(price_precision as i32)), price_precision);
-        let size_increment = Quantity::new(10f64.powi(-(size_precision as i32)), size_precision);
-
-        Self::new(
-            id,
-            symbol,
-            Currency::from(p.token0.symbol.as_str()),
-            Currency::from(p.token1.symbol.as_str()),
-            price_precision,
+        let price_increment =
+            Price::from_mantissa_exponent(1, -price_precision.cast_signed(), price_precision);
+        let size_increment =
+            Quantity::from_mantissa_exponent(1, -size_precision.cast_signed(), size_precision);
+        let base_currency = Currency::new_checked(
+            p.token0.symbol.as_str(),
             size_precision,
-            price_increment,
-            size_increment,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            0.into(),
-            0.into(),
-        )
+            0,
+            p.token0.name.as_str(),
+            CurrencyType::Crypto,
+        )?;
+        let quote_currency = Currency::new_checked(
+            p.token1.symbol.as_str(),
+            price_precision,
+            0,
+            p.token1.name.as_str(),
+            CurrencyType::Crypto,
+        )?;
+        let taker_fee = p.fee.map(|fee| Decimal::new(i64::from(fee), 6));
+
+        let pair = Self::builder()
+            .instrument_id(p.instrument_id)
+            .raw_symbol(p.instrument_id.symbol)
+            .base_currency(base_currency)
+            .quote_currency(quote_currency)
+            .price_precision(price_precision)
+            .size_precision(size_precision)
+            .price_increment(price_increment)
+            .size_increment(size_increment)
+            .maybe_taker_fee(taker_fee)
+            .ts_event(p.ts_event)
+            .ts_init(p.ts_init)
+            .build()?;
+
+        for currency in [base_currency, quote_currency] {
+            if let Err(e) = Currency::register(currency, false) {
+                log::error!(
+                    "Failed to register DeFi token currency '{}': {e}",
+                    currency.code
+                );
+            }
+        }
+
+        Ok(pair)
+    }
+}
+
+impl From<Pool> for CurrencyPair {
+    fn from(p: Pool) -> Self {
+        Self::try_from(&p).expect_display(FAILED)
     }
 }
 
@@ -281,9 +314,16 @@ impl From<Pool> for InstrumentAny {
 
 #[cfg(test)]
 mod tests {
+    use nice_core::correctness::CorrectnessError;
     use rstest::rstest;
+    use rust_decimal::Decimal;
 
-    use super::DexType;
+    use super::{CurrencyPair, DexType};
+    use crate::{
+        defi::{SharedPool, stubs::rain_pool},
+        enums::CurrencyType,
+        types::{currency::Currency, fixed::FIXED_PRECISION},
+    };
 
     #[rstest]
     fn test_dex_type_from_dex_name_valid() {
@@ -367,5 +407,113 @@ mod tests {
             "AerodromeSlipstream"
         );
         assert_eq!(DexType::FluidDEX.to_string(), "FluidDEX");
+    }
+
+    #[rstest]
+    #[case(0, 6, 0, 6)]
+    #[case(6, FIXED_PRECISION, 6, FIXED_PRECISION)]
+    #[case(FIXED_PRECISION, 0, FIXED_PRECISION, 0)]
+    #[case(
+        FIXED_PRECISION + 1,
+        FIXED_PRECISION + 2,
+        FIXED_PRECISION,
+        FIXED_PRECISION
+    )]
+    fn test_pool_to_currency_pair_constructs_exact_increments(
+        #[case] size_precision: u8,
+        #[case] price_precision: u8,
+        #[case] expected_size_precision: u8,
+        #[case] expected_price_precision: u8,
+        rain_pool: SharedPool,
+    ) {
+        let mut pool = (*rain_pool).clone();
+        pool.token0.symbol = "BTC".to_string();
+        pool.token1.symbol = "USDC".to_string();
+        pool.token0.decimals = size_precision;
+        pool.token1.decimals = price_precision;
+
+        let expected_id = pool.instrument_id;
+        let expected_taker_fee = pool.fee.map(|fee| Decimal::new(i64::from(fee), 6));
+        let expected_ts_event = pool.ts_event;
+        let expected_ts_init = pool.ts_init;
+        let pair = CurrencyPair::from(pool);
+        let price_scale_exponent = u32::from(FIXED_PRECISION - expected_price_precision);
+        let size_scale_exponent = u32::from(FIXED_PRECISION - expected_size_precision);
+
+        assert_eq!(pair.id, expected_id);
+        assert_eq!(pair.raw_symbol, expected_id.symbol);
+        assert_eq!(pair.base_currency.code, "BTC");
+        assert_eq!(pair.base_currency.precision, expected_size_precision);
+        assert_eq!(pair.quote_currency.code, "USDC");
+        assert_eq!(pair.quote_currency.precision, expected_price_precision);
+        assert_eq!(pair.price_precision, expected_price_precision);
+        assert_eq!(pair.size_precision, expected_size_precision);
+        assert_eq!(pair.price_increment.raw, 10_i128.pow(price_scale_exponent));
+        assert_eq!(pair.price_increment.precision, expected_price_precision);
+        assert_eq!(pair.size_increment.raw, 10_u128.pow(size_scale_exponent));
+        assert_eq!(pair.size_increment.precision, expected_size_precision);
+        assert_eq!(pair.maker_fee, Decimal::ZERO);
+        assert_eq!(pair.taker_fee, expected_taker_fee.unwrap());
+        assert_eq!(pair.ts_event, expected_ts_event);
+        assert_eq!(pair.ts_init, expected_ts_init);
+    }
+
+    #[rstest]
+    fn test_pool_to_currency_pair_registers_token_currencies(rain_pool: SharedPool) {
+        let mut pool = (*rain_pool).clone();
+        pool.token0.symbol = "ENG444BASE".to_string();
+        pool.token0.name = "ENG-444 Base Token".to_string();
+        pool.token0.decimals = 8;
+        pool.token1.symbol = "ENG444QUOTE".to_string();
+        pool.token1.name = "ENG-444 Quote Token".to_string();
+        pool.token1.decimals = 6;
+
+        let _ = CurrencyPair::from(pool);
+
+        let base = Currency::try_from_str("ENG444BASE").unwrap();
+        let quote = Currency::try_from_str("ENG444QUOTE").unwrap();
+        assert_eq!(base.code, "ENG444BASE");
+        assert_eq!(base.precision, 8);
+        assert_eq!(base.iso4217, 0);
+        assert_eq!(base.name, "ENG-444 Base Token");
+        assert_eq!(base.currency_type, CurrencyType::Crypto);
+        assert_eq!(quote.code, "ENG444QUOTE");
+        assert_eq!(quote.precision, 6);
+        assert_eq!(quote.iso4217, 0);
+        assert_eq!(quote.name, "ENG-444 Quote Token");
+        assert_eq!(quote.currency_type, CurrencyType::Crypto);
+    }
+
+    #[rstest]
+    fn test_pool_to_currency_pair_rejects_invalid_token_metadata(rain_pool: SharedPool) {
+        let mut missing_symbol = (*rain_pool).clone();
+        missing_symbol.token0.symbol.clear();
+        let mut blank_symbol = (*rain_pool).clone();
+        blank_symbol.token0.symbol = "  ".to_string();
+        let mut missing_name = (*rain_pool).clone();
+        missing_name.token0.name.clear();
+
+        let missing_symbol_result = CurrencyPair::try_from(&missing_symbol);
+        let blank_symbol_result = CurrencyPair::try_from(&blank_symbol);
+        let missing_name_result = CurrencyPair::try_from(&missing_name);
+
+        assert_eq!(
+            missing_symbol_result.unwrap_err(),
+            CorrectnessError::EmptyString {
+                param: "code".to_string(),
+            }
+        );
+        assert_eq!(
+            blank_symbol_result.unwrap_err(),
+            CorrectnessError::WhitespaceString {
+                param: "code".to_string(),
+            }
+        );
+        assert_eq!(
+            missing_name_result.unwrap_err(),
+            CorrectnessError::EmptyString {
+                param: "name".to_string(),
+            }
+        );
     }
 }

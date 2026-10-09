@@ -1,14 +1,4 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : stop_limit.rs
-//  @Author       : dyntrait Created On 2026/1/5 14:06
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 use std::{
     fmt::Display,
@@ -16,7 +6,10 @@ use std::{
 };
 
 use indexmap::IndexMap;
-use nice_core::{UUID4, UnixNanos, correctness::FAILED};
+use nice_core::{
+    UUID4, UnixNanos,
+    correctness::{CorrectnessError, FAILED},
+};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use ustr::Ustr;
@@ -36,10 +29,6 @@ use crate::{
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nice_trader.core.nice_pyo3.model")
-)]
 pub struct StopLimitOrder {
     pub price: Price,
     pub trigger_price: Price,
@@ -62,7 +51,8 @@ impl StopLimitOrder {
     /// - The `quantity` is not positive.
     /// - The `display_qty` (when provided) exceeds `quantity`.
     /// - The `time_in_force` is `GTD` **and** `expire_time` is `None` or zero.
-    #[allow(clippy::too_many_arguments)]
+    /// - The order metadata violates an [`OrderInitialized::new_checked`] invariant.
+    #[expect(clippy::too_many_arguments)]
     pub fn new_checked(
         trader_id: TraderId,
         strategy_id: StrategyId,
@@ -91,12 +81,12 @@ impl StopLimitOrder {
         tags: Option<Vec<Ustr>>,
         init_id: UUID4,
         ts_init: UnixNanos,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, OrderError> {
         check_positive_quantity(quantity, stringify!(quantity))?;
         check_display_qty(display_qty, quantity)?;
         check_time_in_force(time_in_force, expire_time)?;
 
-        let init_order = OrderInitialized::new(
+        let init_order = OrderInitialized::new_checked(
             trader_id,
             strategy_id,
             instrument_id,
@@ -113,6 +103,7 @@ impl StopLimitOrder {
             ts_init,
             ts_init,
             Some(price),
+            None,
             Some(trigger_price),
             Some(trigger_type),
             None,
@@ -130,7 +121,7 @@ impl StopLimitOrder {
             exec_algorithm_params,
             exec_spawn_id,
             tags,
-        );
+        )?;
 
         Ok(Self {
             core: OrderCore::new(init_order),
@@ -151,7 +142,8 @@ impl StopLimitOrder {
     /// # Panics
     ///
     /// Panics if any order validation fails (see [`StopLimitOrder::new_checked`]).
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         trader_id: TraderId,
         strategy_id: StrategyId,
@@ -210,7 +202,7 @@ impl StopLimitOrder {
             init_id,
             ts_init,
         )
-            .expect(FAILED)
+        .unwrap_or_else(|e| panic!("{FAILED}: {e}"))
     }
 }
 
@@ -394,6 +386,10 @@ impl Order for StopLimitOrder {
         self.filled_qty
     }
 
+    fn voided_qty(&self) -> Quantity {
+        self.voided_qty
+    }
+
     fn leaves_qty(&self) -> Quantity {
         self.leaves_qty
     }
@@ -402,11 +398,11 @@ impl Order for StopLimitOrder {
         self.overfill_qty
     }
 
-    fn avg_px(&self) -> Option<f64> {
+    fn avg_px(&self) -> Option<Decimal> {
         self.avg_px
     }
 
-    fn slippage(&self) -> Option<f64> {
+    fn slippage(&self) -> Option<Decimal> {
         self.slippage
     }
 
@@ -451,11 +447,10 @@ impl Order for StopLimitOrder {
     }
 
     fn apply(&mut self, event: OrderEventAny) -> Result<(), OrderError> {
-        if let OrderEventAny::Updated(ref event) = event {
-            self.update(event);
-        };
-
-        let is_order_filled = matches!(event, OrderEventAny::Filled(_));
+        let updates_slippage = matches!(
+            event,
+            OrderEventAny::Filled(_) | OrderEventAny::FillVoided(_),
+        );
         let is_order_triggered = matches!(event, OrderEventAny::Triggered(_));
         let ts_event = if is_order_triggered {
             Some(event.ts_event())
@@ -463,23 +458,25 @@ impl Order for StopLimitOrder {
             None
         };
 
-        self.core.apply(event)?;
+        self.core.apply(event.clone())?;
+
+        if let OrderEventAny::Updated(ref event) = event {
+            self.update(event);
+        }
 
         if is_order_triggered {
             self.is_triggered = true;
             self.ts_triggered = ts_event;
         }
 
-        if is_order_filled {
+        if updates_slippage {
             self.core.set_slippage(self.price);
-        };
+        }
 
         Ok(())
     }
 
     fn update(&mut self, event: &OrderUpdated) {
-        self.quantity = event.quantity;
-
         if let Some(price) = event.price {
             self.price = price;
         }
@@ -529,22 +526,39 @@ impl Order for StopLimitOrder {
     }
 }
 
-impl From<OrderInitialized> for StopLimitOrder {
-    fn from(event: OrderInitialized) -> Self {
-        Self::new(
+impl TryFrom<OrderInitialized> for StopLimitOrder {
+    type Error = OrderError;
+
+    fn try_from(event: OrderInitialized) -> Result<Self, Self::Error> {
+        let price = event
+            .price
+            .ok_or_else(|| CorrectnessError::PredicateViolation {
+                message: "`price` is required for `StopLimitOrder` initialization".to_string(),
+            })?;
+        let trigger_price =
+            event
+                .trigger_price
+                .ok_or_else(|| CorrectnessError::PredicateViolation {
+                    message: "`trigger_price` is required for `StopLimitOrder` initialization"
+                        .to_string(),
+                })?;
+        let trigger_type =
+            event
+                .trigger_type
+                .ok_or_else(|| CorrectnessError::PredicateViolation {
+                    message: "`trigger_type` is required for `StopLimitOrder` initialization"
+                        .to_string(),
+                })?;
+        Self::new_checked(
             event.trader_id,
             event.strategy_id,
             event.instrument_id,
             event.client_order_id,
             event.order_side,
             event.quantity,
-            event.price.expect("`price` was None for StopLimitOrder"),
-            event
-                .trigger_price
-                .expect("`trigger_price` was None for StopLimitOrder"),
-            event
-                .trigger_type
-                .expect("`trigger_type` was None for StopLimitOrder"),
+            price,
+            trigger_price,
+            trigger_type,
             event.time_in_force,
             event.expire_time,
             event.post_only,
@@ -590,7 +604,7 @@ impl Display for StopLimitOrder {
                 .map_or("None".to_string(), |position_id| format!("{position_id}")),
             self.tags.clone().map_or("None".to_string(), |tags| tags
                 .iter()
-                .map(|s| s.to_string())
+                .map(ToString::to_string)
                 .collect::<Vec<String>>()
                 .join(", ")),
         )
@@ -604,8 +618,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        enums::{OrderSide, TimeInForce, TriggerType},
-        events::order::initialized::OrderInitializedBuilder,
+        enums::{OrderSide, PositionSide, TimeInForce, TriggerType},
+        events::order::spec::OrderInitializedSpec,
         identifiers::InstrumentId,
         instruments::{CurrencyPair, stubs::*},
         orders::{OrderTestBuilder, stubs::TestOrderStubs},
@@ -613,10 +627,10 @@ mod tests {
     };
 
     #[rstest]
-    fn test_initialize(_audusd_sim: CurrencyPair) {
+    fn test_initialize(audusd_sim: CurrencyPair) {
         // ---------------------------------------------------------------------
         let order = OrderTestBuilder::new(OrderType::StopLimit)
-            .instrument_id(_audusd_sim.id)
+            .instrument_id(audusd_sim.id)
             .side(OrderSide::Buy)
             .trigger_price(Price::from("0.68000"))
             .price(Price::from("0.68100"))
@@ -653,9 +667,9 @@ mod tests {
     }
 
     #[rstest]
-    #[should_panic]
+    #[should_panic(expected = "display_qty` may not exceed `quantity")]
     fn test_display_qty_gt_quantity_err(audusd_sim: CurrencyPair) {
-        OrderTestBuilder::new(OrderType::StopLimit)
+        let _ = OrderTestBuilder::new(OrderType::StopLimit)
             .instrument_id(audusd_sim.id)
             .side(OrderSide::Buy)
             .trigger_price(Price::from("30300"))
@@ -667,9 +681,9 @@ mod tests {
     }
 
     #[rstest]
-    #[should_panic]
+    #[should_panic(expected = "Quantity must be non-negative")]
     fn test_display_qty_negative_err(audusd_sim: CurrencyPair) {
-        OrderTestBuilder::new(OrderType::StopLimit)
+        let _ = OrderTestBuilder::new(OrderType::StopLimit)
             .instrument_id(audusd_sim.id)
             .side(OrderSide::Buy)
             .trigger_price(Price::from("30300"))
@@ -681,9 +695,9 @@ mod tests {
     }
 
     #[rstest]
-    #[should_panic]
+    #[should_panic(expected = "expire_time` is required for `GTD` order")]
     fn test_gtd_without_expire_time_err(audusd_sim: CurrencyPair) {
-        OrderTestBuilder::new(OrderType::StopLimit)
+        let _ = OrderTestBuilder::new(OrderType::StopLimit)
             .instrument_id(audusd_sim.id)
             .side(OrderSide::Buy)
             .trigger_price(Price::from("30300"))
@@ -730,7 +744,7 @@ mod tests {
     #[rstest]
     fn test_stop_limit_order_expire_time() {
         // Create a stop limit order with an expire time
-        let expire_time = UnixNanos::from(1234567890);
+        let expire_time = UnixNanos::from(1_234_567_890);
         let order = OrderTestBuilder::new(OrderType::StopLimit)
             .instrument_id(InstrumentId::from("BTC-USDT.BINANCE"))
             .quantity(Quantity::from(10))
@@ -829,21 +843,20 @@ mod tests {
     #[rstest]
     fn test_stop_limit_order_from_order_initialized() {
         // Create an OrderInitialized event with all required fields for a StopLimitOrder
-        let order_initialized = OrderInitializedBuilder::default()
+        let order_initialized = OrderInitializedSpec::builder()
             .order_type(OrderType::StopLimit)
             .quantity(Quantity::from(10))
-            .price(Some(Price::new(100.0, 2)))
-            .trigger_price(Some(Price::new(95.0, 2)))
-            .trigger_type(Some(TriggerType::Default))
+            .price(Price::new(100.0, 2))
+            .trigger_price(Price::new(95.0, 2))
+            .trigger_type(TriggerType::Default)
             .post_only(true)
             .reduce_only(true)
-            .expire_time(Some(UnixNanos::from(1234567890)))
-            .display_qty(Some(Quantity::from(5)))
-            .build()
-            .unwrap();
+            .expire_time(UnixNanos::from(1_234_567_890))
+            .display_qty(Quantity::from(5))
+            .build();
 
         // Convert the OrderInitialized event into a StopLimitOrder
-        let order: StopLimitOrder = order_initialized.clone().into();
+        let order: StopLimitOrder = order_initialized.clone().try_into().unwrap();
 
         // Assert essential fields match the OrderInitialized fields
         assert_eq!(order.trader_id(), order_initialized.trader_id);

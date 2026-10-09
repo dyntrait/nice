@@ -1,16 +1,7 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : quote.rs.rs
-//  @Author       : dyntrait Created On 2026/1/5 14:39
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 use alloy_primitives::{Address, I256, U160, U256};
+use nice_core::UnixNanos;
 
 use crate::{
     defi::{
@@ -25,16 +16,13 @@ use crate::{
     identifiers::InstrumentId,
 };
 
-/// Comprehensive swap quote containing profiling metrics for a hypothetical swap.
+/// Swap quote containing profiling metrics for a hypothetical swap.
 ///
 /// This structure provides detailed analysis of what would happen if a swap were executed,
 /// including price impact, fees, slippage, and execution details, without actually
 /// modifying the pool state.
 #[derive(Debug, Clone)]
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nautilus_trader.core.nautilus_pyo3.model")
-)]
+
 pub struct SwapQuote {
     /// Instrument identifier ......
     pub instrument_id: InstrumentId,
@@ -65,12 +53,13 @@ pub struct SwapQuote {
 }
 
 impl SwapQuote {
-    #[allow(clippy::too_many_arguments)]
-    /// Creates a [`SwapQuote`] instance with comprehensive swap simulation results.
+    #[expect(clippy::too_many_arguments)]
+    /// Creates a [`SwapQuote`] instance with swap simulation results.
     ///
     /// The `trade_info` field is initialized to `None` and must be populated by calling
     /// [`calculate_trade_info()`](Self::calculate_trade_info) or will be lazily computed
     /// when accessing price impact or slippage methods.
+    #[must_use]
     pub fn new(
         instrument_id: InstrumentId,
         amount0: I256,
@@ -102,7 +91,7 @@ impl SwapQuote {
         }
     }
 
-    fn check_if_trade_info_initialized(&mut self) -> anyhow::Result<&SwapTradeInfo> {
+    fn check_if_trade_info_initialized(&self) -> anyhow::Result<&SwapTradeInfo> {
         if self.trade_info.is_none() {
             anyhow::bail!(
                 "Trade info is not initialized. Please call calculate_trade_info() first."
@@ -135,17 +124,20 @@ impl SwapQuote {
 
     /// Determines swap direction from amount signs.
     ///
-    /// Returns `true` if swapping token0 for token1 (zero_for_one).
+    /// Returns `true` if swapping token0 for token1 (`zero_for_one`).
+    #[must_use]
     pub fn zero_for_one(&self) -> bool {
         self.amount0.is_positive()
     }
 
     /// Returns the total fees paid in input token(LP fees + protocol fees).
+    #[must_use]
     pub fn total_fee(&self) -> U256 {
         self.lp_fee + self.protocol_fee
     }
 
     /// Gets the effective fee rate in basis points based on actual fees charged
+    #[must_use]
     pub fn get_effective_fee_bps(&self) -> u32 {
         let input_amount = self.get_input_amount();
         if input_amount.is_zero() {
@@ -165,11 +157,13 @@ impl SwapQuote {
     ///
     /// This equals the length of the `crossed_ticks` vector and indicates
     /// how much liquidity the swap traversed.
+    #[must_use]
     pub fn total_crossed_ticks(&self) -> u32 {
         self.crossed_ticks.len() as u32
     }
 
     /// Gets the output amount for the given swap direction.
+    #[must_use]
     pub fn get_output_amount(&self) -> U256 {
         if self.zero_for_one() {
             self.amount1.unsigned_abs()
@@ -179,6 +173,7 @@ impl SwapQuote {
     }
 
     /// Gets the input amount for the given swap direction.
+    #[must_use]
     pub fn get_input_amount(&self) -> U256 {
         if self.zero_for_one() {
             self.amount0.unsigned_abs()
@@ -254,13 +249,16 @@ impl SwapQuote {
     ///
     /// # Returns
     /// A [`PoolSwap`] event containing both the quote data and provided metadata
-    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    #[expect(clippy::too_many_arguments)]
     pub fn to_swap_event(
         &self,
         chain: SharedChain,
         dex: SharedDex,
         pool_identifier: PoolIdentifier,
         block: BlockPosition,
+        ts_event: UnixNanos,
+        ts_init: UnixNanos,
         sender: Address,
         recipient: Address,
     ) -> PoolSwap {
@@ -274,7 +272,8 @@ impl SwapQuote {
             block.transaction_hash,
             block.transaction_index,
             block.log_index,
-            None, // timestamp
+            ts_event,
+            ts_init,
             sender,
             recipient,
             self.amount0,
@@ -297,7 +296,47 @@ mod tests {
     use crate::{
         defi::{SharedPool, stubs::rain_pool},
         enums::OrderSide,
+        types::{Price, Quantity, fixed::FIXED_PRECISION},
     };
+
+    #[rstest]
+    fn test_metric_errors_propagate_from_trade_info(rain_pool: SharedPool) {
+        let mut swap_quote = SwapQuote::new(
+            rain_pool.instrument_id,
+            I256::from_str("2").unwrap(),
+            I256::from_str("-1").unwrap(),
+            U160::from(3),
+            U160::from(4),
+            -5,
+            -4,
+            6,
+            U256::from(7),
+            U256::from(8),
+            U256::from(9),
+            vec![],
+        );
+        swap_quote.trade_info = Some(SwapTradeInfo {
+            order_side: OrderSide::Buy,
+            quantity_base: Quantity::from("10"),
+            quantity_quote: Quantity::from("11"),
+            spot_price: Price::from_raw(12, FIXED_PRECISION),
+            execution_price: Price::from_raw(13, FIXED_PRECISION),
+            is_inverted: true,
+            spot_price_before: Some(Price::zero(FIXED_PRECISION)),
+        });
+
+        let price_impact_error = swap_quote.get_price_impact_bps().unwrap_err();
+        let slippage_error = swap_quote.get_slippage_bps().unwrap_err();
+
+        assert_eq!(
+            price_impact_error.to_string(),
+            "Cannot calculate price impact, the spot price before is zero"
+        );
+        assert_eq!(
+            slippage_error.to_string(),
+            "Cannot calculate slippage, the spot price before is zero"
+        );
+    }
 
     #[rstest]
     fn test_swap_quote_sell(rain_pool: SharedPool) {
@@ -312,9 +351,9 @@ mod tests {
             amount1,
             sqrt_x96_price_before,
             U160::from_str("76812046714213096298497129").unwrap(),
-            -138746,
-            -138782,
-            292285495328044734302670,
+            -138_746,
+            -138_782,
+            292_285_495_328_044_734_302_670,
             U256::ZERO,
             U256::ZERO,
             U256::ZERO,
@@ -361,9 +400,9 @@ mod tests {
             amount1,
             sqrt_x96_price_before,
             U160::from_str("76857455902960072891859299").unwrap(),
-            -138778,
-            -138770,
-            292285495328044734302670,
+            -138_778,
+            -138_770,
+            292_285_495_328_044_734_302_670,
             U256::ZERO,
             U256::ZERO,
             U256::ZERO,

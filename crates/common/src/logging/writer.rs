@@ -1,31 +1,23 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2025 dyntrait. All rights reserved.
-//
-//  @File         : writer.rs
-//  @Author       : dyntrait
-//  @Description  :
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
-// -------------------------------------------------------------------------------------------------
+
+//! Stdout, stderr, and rotating file log writers.
 
 use std::{
+    borrow::Cow,
     collections::VecDeque,
     fs::{File, create_dir_all},
     io::{self, BufWriter, Stderr, Stdout, Write},
     path::PathBuf,
-    sync::OnceLock,
 };
 
-use chrono::{NaiveDate, Utc};
+use jiff::{Timestamp, civil::Date, tz::Offset};
 use log::LevelFilter;
-use regex::Regex;
+use nice_core::consts::NICE_PREFIX;
+use serde::{Deserialize, Serialize};
 
-use crate::logging::logger::LogLine;
-
-static ANSI_RE: OnceLock<Regex> = OnceLock::new();
+use crate::{
+    config::{ConfigError, ConfigErrorCollector, ConfigResult},
+    logging::logger::LogLine,
+};
 
 pub trait LogWriter {
     /// Writes a log line.
@@ -36,46 +28,68 @@ pub trait LogWriter {
     fn enabled(&self, line: &LogLine) -> bool;
 }
 
+/// Writes eligible log lines to stdout with optional buffering and ANSI colors.
 #[derive(Debug)]
 pub struct StdoutWriter {
     pub is_colored: bool,
-    io: Stdout,
+    io: StdoutSink,
     level: LevelFilter,
+}
+
+#[derive(Debug)]
+enum StdoutSink {
+    Direct(Stdout),
+    Buffered(BufWriter<Stdout>),
 }
 
 impl StdoutWriter {
     /// Creates a new [`StdoutWriter`] instance.
     #[must_use]
-    pub fn new(level: LevelFilter, is_colored: bool) -> Self {
+    pub fn new(level: LevelFilter, is_colored: bool, buffered: bool) -> Self {
+        let io = if buffered {
+            StdoutSink::Buffered(BufWriter::new(io::stdout()))
+        } else {
+            StdoutSink::Direct(io::stdout())
+        };
+
         Self {
-            io: io::stdout(),
-            level,
             is_colored,
+            io,
+            level,
         }
     }
 }
 
 impl LogWriter for StdoutWriter {
     fn write(&mut self, line: &str) {
-        match self.io.write_all(line.as_bytes()) {
-            Ok(()) => {}
-            Err(e) => eprintln!("Error writing to stdout: {e:?}"),
+        let result = match &mut self.io {
+            StdoutSink::Direct(io) => io.write_all(line.as_bytes()),
+            StdoutSink::Buffered(io) => io.write_all(line.as_bytes()),
+        };
+
+        if let Err(e) = result {
+            eprintln!("Error writing to stdout: {e:?}");
         }
     }
 
     fn flush(&mut self) {
-        match self.io.flush() {
-            Ok(()) => {}
-            Err(e) => eprintln!("Error flushing stdout: {e:?}"),
+        let result = match &mut self.io {
+            StdoutSink::Direct(io) => io.flush(),
+            StdoutSink::Buffered(io) => io.flush(),
+        };
+
+        if let Err(e) = result {
+            eprintln!("Error flushing stdout: {e:?}");
         }
     }
 
     fn enabled(&self, line: &LogLine) -> bool {
-        // Prevent error logs also writing to stdout
+        // Prevent error logs also writing to stdout (they go to stderr)
         line.level > LevelFilter::Error && line.level <= self.level
     }
 }
 
+/// Writes error log lines to stderr.
 #[derive(Debug)]
 pub struct StderrWriter {
     pub is_colored: bool,
@@ -95,16 +109,14 @@ impl StderrWriter {
 
 impl LogWriter for StderrWriter {
     fn write(&mut self, line: &str) {
-        match self.io.write_all(line.as_bytes()) {
-            Ok(()) => {}
-            Err(e) => eprintln!("Error writing to stderr: {e:?}"),
+        if let Err(e) = self.io.write_all(line.as_bytes()) {
+            eprintln!("Error writing to stderr: {e:?}");
         }
     }
 
     fn flush(&mut self) {
-        match self.io.flush() {
-            Ok(()) => {}
-            Err(e) => eprintln!("Error flushing stderr: {e:?}"),
+        if let Err(e) = self.io.flush() {
+            eprintln!("Error flushing stderr: {e:?}");
         }
     }
 
@@ -113,20 +125,40 @@ impl LogWriter for StderrWriter {
     }
 }
 
-/// File rotation config.
-#[derive(Debug, Clone)]
+/// Configures size-based log file rotation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct FileRotateConfig {
     /// Maximum file size in bytes before rotating.
     pub max_file_size: u64,
     /// Maximum number of backup files to keep.
     pub max_backup_count: u32,
     /// Current file size tracking.
+    #[serde(skip)]
     cur_file_size: u64,
     /// Current file creation date.
-    cur_file_creation_date: NaiveDate,
+    #[serde(skip, default = "today_date")]
+    cur_file_creation_date: Date,
     /// Queue of backup file paths (oldest first).
+    #[serde(skip)]
     backup_files: VecDeque<PathBuf>,
 }
+
+fn utc_date(timestamp: Timestamp) -> Date {
+    Offset::UTC.to_datetime(timestamp).date()
+}
+
+fn today_date() -> Date {
+    utc_date(Timestamp::now())
+}
+
+impl PartialEq for FileRotateConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.max_file_size == other.max_file_size && self.max_backup_count == other.max_backup_count
+    }
+}
+
+impl Eq for FileRotateConfig {}
 
 impl Default for FileRotateConfig {
     fn default() -> Self {
@@ -134,7 +166,7 @@ impl Default for FileRotateConfig {
             max_file_size: 100 * 1024 * 1024, // 100MB default
             max_backup_count: 5,
             cur_file_size: 0,
-            cur_file_creation_date: Utc::now().date_naive(),
+            cur_file_creation_date: today_date(),
             backup_files: VecDeque::new(),
         }
     }
@@ -147,14 +179,23 @@ impl From<(u64, u32)> for FileRotateConfig {
             max_file_size,
             max_backup_count,
             cur_file_size: 0,
-            cur_file_creation_date: Utc::now().date_naive(),
+            cur_file_creation_date: today_date(),
             backup_files: VecDeque::new(),
         }
     }
 }
 
-
-#[derive(Debug, Clone, Default)]
+/// Configures file log output.
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nice_trader.common", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nice_trader.common")
+)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct FileWriterConfig {
     pub directory: Option<String>,
     pub file_name: Option<String>,
@@ -179,8 +220,41 @@ impl FileWriterConfig {
             file_rotate,
         }
     }
+
+    /// Validates the file writer configuration, collecting every field violation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ConfigError`] (a [`ConfigError::Multiple`] when more than one field is
+    /// invalid) if any field fails validation.
+    pub fn validate(&self) -> ConfigResult<()> {
+        let mut errors = ConfigErrorCollector::new();
+
+        for (field, value) in [
+            ("file_config.directory", &self.directory),
+            ("file_config.file_name", &self.file_name),
+        ] {
+            if let Some(value) = value {
+                errors.check(!value.trim().is_empty(), ConfigError::empty_field(field));
+            }
+        }
+
+        if let Some(rotate) = &self.file_rotate {
+            let max_file_size = rotate.max_file_size;
+            errors.check(
+                max_file_size > 0,
+                ConfigError::range(
+                    "file_config.file_rotate.max_file_size",
+                    format!("must be a positive number of bytes, was {max_file_size}"),
+                ),
+            );
+        }
+
+        errors.into_result()
+    }
 }
 
+/// Writes sanitized plain-text or JSON log lines with optional file rotation.
 #[derive(Debug)]
 pub struct FileWriter {
     pub json_format: bool,
@@ -190,8 +264,12 @@ pub struct FileWriter {
     trader_id: String,
     instance_id: String,
     level: LevelFilter,
-    cur_file_date: NaiveDate,
+    cur_file_date: Date,
+    sync_on_flush: bool,
 }
+
+// Rotated log file names avoid ':' which is reserved in Windows file names
+const ROTATION_TIMESTAMP_FORMAT: &str = "%Y-%m-%d_%H%M%S-%3f";
 
 impl FileWriter {
     /// Creates a new [`FileWriter`] instance.
@@ -200,52 +278,69 @@ impl FileWriter {
         instance_id: String,
         file_config: FileWriterConfig,
         fileout_level: LevelFilter,
+        clear_log_file: bool,
+        sync_on_flush: bool,
     ) -> Option<Self> {
         // Set up log file
         let json_format = match file_config.file_format.as_ref().map(|s| s.to_lowercase()) {
             Some(ref format) if format == "json" => true,
             None => false,
             Some(ref unrecognized) => {
-                tracing::error!(
-                    "Unrecognized log file format: {unrecognized}. Using plain text format as default."
+                eprintln!(
+                    "{NICE_PREFIX} Unrecognized log file format: {unrecognized}. Using plain text format as default."
                 );
                 false
             }
         };
 
-        let file_path =
-            Self::create_log_file_path(&file_config, &trader_id, &instance_id, json_format);
-
-        match File::options()
-            .create(true)
-            .append(true)
-            .open(file_path.clone())
-        {
-            Ok(file) => {
-                // Seed cur_file_size from existing file length if rotation is enabled
-                let mut file_config = file_config;
-                if let Some(ref mut rotate_config) = file_config.file_rotate
-                    && let Ok(metadata) = file.metadata()
-                {
-                    rotate_config.cur_file_size = metadata.len();
-                }
-
-                Some(Self {
-                    json_format,
-                    buf: BufWriter::new(file),
-                    path: file_path,
-                    file_config,
-                    trader_id,
-                    instance_id,
-                    level: fileout_level,
-                    cur_file_date: Utc::now().date_naive(),
-                })
-            }
+        let file_path = match Self::create_log_file_path(
+            &file_config,
+            &trader_id,
+            &instance_id,
+            json_format,
+            Timestamp::now(),
+        ) {
+            Ok(path) => path,
             Err(e) => {
-                tracing::error!("Error creating log file: {e}");
-                None
+                eprintln!("{NICE_PREFIX} Error creating log directory: {e}");
+                return None;
             }
+        };
+
+        if clear_log_file
+            && file_path.exists()
+            && let Err(e) = File::create(&file_path)
+        {
+            eprintln!("{NICE_PREFIX} Error clearing log file: {e}");
         }
+
+        let file = match File::options().create(true).append(true).open(&file_path) {
+            Ok(file) => file,
+            Err(e) => {
+                eprintln!("{NICE_PREFIX} Error creating log file: {e}");
+                return None;
+            }
+        };
+
+        // Seed cur_file_size from existing file length if rotation is enabled
+        let mut file_config = file_config;
+        if let Some(ref mut rotate_config) = file_config.file_rotate
+            && let Ok(metadata) = file.metadata()
+        {
+            rotate_config.cur_file_size = metadata.len();
+        }
+
+        Some(Self {
+            json_format,
+            buf: BufWriter::new(file),
+            path: file_path,
+            file_config,
+            trader_id,
+            instance_id,
+            level: fileout_level,
+            cur_file_date: today_date(),
+            sync_on_flush,
+        })
     }
 
     fn create_log_file_path(
@@ -253,41 +348,36 @@ impl FileWriter {
         trader_id: &str,
         instance_id: &str,
         is_json_format: bool,
-    ) -> PathBuf {
-        let utc_now = Utc::now();
-
-        let basename = match file_config.file_name.as_ref() {
-            Some(file_name) => {
-                if file_config.file_rotate.is_some() {
-                    let utc_datetime = utc_now.format("%Y-%m-%d_%H%M%S:%3f");
-                    format!("{file_name}_{utc_datetime}")
-                } else {
-                    file_name.clone()
-                }
+        utc_now: Timestamp,
+    ) -> Result<PathBuf, io::Error> {
+        let basename = if let Some(file_name) = file_config.file_name.as_ref() {
+            if file_config.file_rotate.is_some() {
+                let utc_datetime = utc_now.strftime(ROTATION_TIMESTAMP_FORMAT);
+                format!("{file_name}_{utc_datetime}")
+            } else {
+                file_name.clone()
             }
-            None => {
-                // Default base name
-                let utc_component = if file_config.file_rotate.is_some() {
-                    utc_now.format("%Y-%m-%d_%H%M%S:%3f")
-                } else {
-                    utc_now.format("%Y-%m-%d")
-                };
+        } else {
+            let utc_component = if file_config.file_rotate.is_some() {
+                utc_now.strftime(ROTATION_TIMESTAMP_FORMAT)
+            } else {
+                utc_now.strftime("%Y-%m-%d")
+            };
 
-                format!("{trader_id}_{utc_component}_{instance_id}")
-            }
+            format!("{trader_id}_{utc_component}_{instance_id}")
         };
 
-        let suffix = if is_json_format { "json" } else { "log" };
+        let suffix = if is_json_format { "jsonl" } else { "log" };
         let mut file_path = PathBuf::new();
 
         if let Some(directory) = file_config.directory.as_ref() {
             file_path.push(directory);
-            create_dir_all(&file_path).expect("Failed to create directories for log file");
+            create_dir_all(&file_path)?;
         }
 
         file_path.push(basename);
         file_path.set_extension(suffix);
-        file_path
+        Ok(file_path)
     }
 
     #[must_use]
@@ -297,7 +387,7 @@ impl FileWriter {
             rotate_config.cur_file_size + next_line_size > rotate_config.max_file_size
         // Otherwise, for default-named logs, rotate on UTC date change
         } else if self.file_config.file_name.is_none() {
-            let today = Utc::now().date_naive();
+            let today = today_date();
             self.cur_file_date != today
         // No rotation for custom-named logs without size-based rotation
         } else {
@@ -306,37 +396,101 @@ impl FileWriter {
     }
 
     fn rotate_file(&mut self) {
-        // Flush current file
-        self.flush();
+        self.rotate_file_at(Timestamp::now());
+    }
 
-        // Create new file
-        let new_path = Self::create_log_file_path(
+    fn rotate_file_at(&mut self, utc_now: Timestamp) {
+        self.flush_and_sync_logged();
+
+        let new_path = match Self::create_log_file_path(
             &self.file_config,
             &self.trader_id,
             &self.instance_id,
             self.json_format,
-        );
-        match File::options().create(true).append(true).open(&new_path) {
-            Ok(new_file) => {
-                // Rotate existing file
-                if let Some(rotate_config) = &mut self.file_config.file_rotate {
-                    // Add current file to backup queue
-                    rotate_config.backup_files.push_back(self.path.clone());
-                    rotate_config.cur_file_size = 0;
-                    rotate_config.cur_file_creation_date = Utc::now().date_naive();
-                    cleanup_backups(rotate_config);
-                } else {
-                    // Update creation date for date-based rotation
-                    self.cur_file_date = Utc::now().date_naive();
-                }
-
-                self.buf = BufWriter::new(new_file);
-                self.path = new_path;
+            utc_now,
+        ) {
+            Ok(path) => path,
+            Err(e) => {
+                eprintln!("{NICE_PREFIX} Error creating log directory for rotation: {e}");
+                return;
             }
-            Err(e) => tracing::error!("Error creating log file: {e}"),
+        };
+
+        if new_path == self.path {
+            // Rotation names have millisecond resolution: a second rotation within the same
+            // millisecond resolves to the active path. Keep writing to it; rotating would
+            // enqueue the active file as a backup where cleanup could delete it.
+            return;
         }
 
-        tracing::info!("Rotated log file, now logging to: {}", self.path.display());
+        let new_file = match File::options().create(true).append(true).open(&new_path) {
+            Ok(file) => file,
+            Err(e) => {
+                eprintln!("{NICE_PREFIX} Error creating log file: {e}");
+                return;
+            }
+        };
+
+        // Rotate existing file
+        if let Some(rotate_config) = &mut self.file_config.file_rotate {
+            // Add current file to backup queue
+            rotate_config.backup_files.push_back(self.path.clone());
+            rotate_config.cur_file_size = 0;
+            rotate_config.cur_file_creation_date = utc_date(utc_now);
+            cleanup_backups(rotate_config);
+        } else {
+            // Update creation date for date-based rotation
+            self.cur_file_date = utc_date(utc_now);
+        }
+
+        self.buf = BufWriter::new(new_file);
+        self.path.clone_from(&new_path);
+        eprintln!(
+            "{NICE_PREFIX} Rotated log file, now logging to: {}",
+            new_path.display()
+        );
+    }
+
+    /// Flushes the userspace file buffer to the OS.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying file buffer cannot be flushed.
+    pub fn flush_buffer(&mut self) -> io::Result<()> {
+        self.buf.flush()
+    }
+
+    /// Requests that flushed file data is synchronized to durable storage.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operating system cannot sync the file to disk.
+    pub fn sync_to_disk(&mut self) -> io::Result<()> {
+        self.buf.get_ref().sync_all()
+    }
+
+    /// Flushes buffered file data and then syncs it to disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if either flushing the file buffer or syncing the file to disk fails.
+    pub fn flush_and_sync(&mut self) -> io::Result<()> {
+        let flush_result = self.flush_buffer();
+        let sync_result = self.sync_to_disk();
+        flush_result.and(sync_result)
+    }
+
+    /// Flushes and syncs while preserving the existing logging-on-error behavior.
+    pub fn flush_and_sync_logged(&mut self) {
+        let flush_result = self.flush_buffer();
+        if let Err(e) = flush_result {
+            eprintln!("{NICE_PREFIX} Error flushing file: {e:?}");
+        }
+
+        let sync_result = self.sync_to_disk();
+        if let Err(e) = sync_result {
+            eprintln!("{NICE_PREFIX} Error syncing file: {e:?}");
+        }
     }
 }
 
@@ -351,24 +505,24 @@ fn cleanup_backups(rotate_config: &mut FileRotateConfig) {
         .len()
         .saturating_sub(rotate_config.max_backup_count as usize);
     for _ in 0..excess {
-        if let Some(path) = rotate_config.backup_files.pop_front() {
-            if path.exists() {
-                match std::fs::remove_file(&path) {
-                    Ok(_) => tracing::debug!("Removed old log file: {}", path.display()),
-                    Err(e) => {
-                        tracing::error!("Failed to remove old log file {}: {e}", path.display());
-                    }
-                }
-            }
-        } else {
+        let Some(path) = rotate_config.backup_files.pop_front() else {
             break;
+        };
+
+        if path.exists()
+            && let Err(e) = std::fs::remove_file(&path)
+        {
+            eprintln!(
+                "{NICE_PREFIX} Failed to remove old log file {}: {e}",
+                path.display()
+            );
         }
     }
 }
 
 impl LogWriter for FileWriter {
     fn write(&mut self, line: &str) {
-        let line = strip_ansi_codes(line);
+        let line = sanitize_file_line(line);
         let line_size = line.len() as u64;
 
         // Rotate file if needed (size-based or date-based depending on configuration)
@@ -376,26 +530,26 @@ impl LogWriter for FileWriter {
             self.rotate_file();
         }
 
-        match self.buf.write_all(line.as_bytes()) {
-            Ok(()) => {
-                // Update current file size
-                if let Some(rotate_config) = &mut self.file_config.file_rotate {
-                    rotate_config.cur_file_size += line_size;
-                }
-            }
-            Err(e) => tracing::error!("Error writing to file: {e:?}"),
+        if let Err(e) = self.buf.write_all(line.as_bytes()) {
+            eprintln!("{NICE_PREFIX} Error writing to file: {e:?}");
+            return;
+        }
+
+        // Update current file size
+        if let Some(rotate_config) = &mut self.file_config.file_rotate {
+            rotate_config.cur_file_size += line_size;
         }
     }
 
     fn flush(&mut self) {
-        match self.buf.flush() {
-            Ok(()) => {}
-            Err(e) => tracing::error!("Error flushing file: {e:?}"),
+        if let Err(e) = self.flush_buffer() {
+            eprintln!("{NICE_PREFIX} Error flushing file: {e:?}");
         }
 
-        match self.buf.get_ref().sync_all() {
-            Ok(()) => {}
-            Err(e) => tracing::error!("Error syncing file: {e:?}"),
+        if self.sync_on_flush
+            && let Err(e) = self.sync_to_disk()
+        {
+            eprintln!("{NICE_PREFIX} Error syncing file: {e:?}");
         }
     }
 
@@ -404,25 +558,149 @@ impl LogWriter for FileWriter {
     }
 }
 
-fn strip_nonprinting_except_newline(s: &str) -> String {
+fn contains_ansi_escape(s: &str) -> bool {
+    s.as_bytes().contains(&b'\x1b')
+}
+
+fn contains_nonprinting_except_newline(s: &str) -> bool {
+    if s.is_ascii() {
+        return s.bytes().any(|b| b != b'\n' && (b < b' ' || b == b'\x7f'));
+    }
+
+    s.chars()
+        .any(|c| c != '\n' && (c.is_control() || c == '\u{7F}'))
+}
+
+fn strip_nonprinting_except_newline(s: &str) -> Cow<'_, str> {
+    if !contains_nonprinting_except_newline(s) {
+        return Cow::Borrowed(s);
+    }
+
+    Cow::Owned(strip_nonprinting_to_string(s))
+}
+
+fn strip_nonprinting_to_string(s: &str) -> String {
     s.chars()
         .filter(|&c| c == '\n' || (!c.is_control() && c != '\u{7F}'))
         .collect()
 }
 
-fn strip_ansi_codes(s: &str) -> String {
-    let re = ANSI_RE.get_or_init(|| Regex::new(r"\x1B\[[0-9;?=]*[A-Za-z]|\x1B\].*?\x07").unwrap());
-    let no_controls = strip_nonprinting_except_newline(s);
-    re.replace_all(&no_controls, "").to_string()
+fn sanitize_file_line(s: &str) -> Cow<'_, str> {
+    if !contains_ansi_escape(s) {
+        return strip_nonprinting_except_newline(s);
+    }
+
+    Cow::Owned(strip_ansi_and_nonprinting_to_string(s))
+}
+
+fn strip_ansi_and_nonprinting_to_string(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == b'\x1b' {
+            if let Some(end) = ansi_escape_end(bytes, i) {
+                i = end;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+
+        if bytes[i].is_ascii() {
+            if bytes[i] == b'\n' || (bytes[i] >= b' ' && bytes[i] != b'\x7f') {
+                out.push(bytes[i] as char);
+            }
+            i += 1;
+            continue;
+        }
+
+        let ch = s[i..]
+            .chars()
+            .next()
+            .expect("valid UTF-8 char boundary expected");
+
+        if ch == '\n' || (!ch.is_control() && ch != '\u{7F}') {
+            out.push(ch);
+        }
+        i += ch.len_utf8();
+    }
+
+    out
+}
+
+fn ansi_escape_end(bytes: &[u8], start: usize) -> Option<usize> {
+    match bytes.get(start + 1).copied() {
+        Some(b'[') => csi_escape_end(bytes, start + 2),
+        Some(b']') => osc_escape_end(bytes, start + 2),
+        _ => None,
+    }
+}
+
+fn csi_escape_end(bytes: &[u8], mut i: usize) -> Option<usize> {
+    while let Some(byte) = bytes.get(i).copied() {
+        if byte.is_ascii_alphabetic() {
+            return Some(i + 1);
+        }
+
+        if !matches!(byte, b'0'..=b'9' | b';' | b'?' | b'=') {
+            return None;
+        }
+        i += 1;
+    }
+
+    None
+}
+
+fn osc_escape_end(bytes: &[u8], mut i: usize) -> Option<usize> {
+    while let Some(byte) = bytes.get(i).copied() {
+        if byte == b'\x07' {
+            return Some(i + 1);
+        }
+        i += 1;
+    }
+
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use log::LevelFilter;
     use rstest::rstest;
+    use smallvec::SmallVec;
     use tempfile::tempdir;
 
     use super::*;
+
+    #[rstest]
+    fn test_validate_accepts_default() {
+        assert!(FileWriterConfig::default().validate().is_ok());
+    }
+
+    #[rstest]
+    fn test_validate_rejects_empty_directory() {
+        let config = FileWriterConfig::new(Some(String::new()), None, None, None);
+        assert!(
+            matches!(config.validate(), Err(ConfigError::EmptyField { field }) if field == "file_config.directory")
+        );
+    }
+
+    #[rstest]
+    fn test_validate_rejects_empty_file_name() {
+        let config = FileWriterConfig::new(None, Some(String::new()), None, None);
+        assert!(
+            matches!(config.validate(), Err(ConfigError::EmptyField { field }) if field == "file_config.file_name")
+        );
+    }
+
+    #[rstest]
+    fn test_validate_rejects_zero_rotation_size() {
+        let config = FileWriterConfig::new(None, None, None, Some((0, 5)));
+        assert!(
+            matches!(config.validate(), Err(ConfigError::Range { field, .. }) if field == "file_config.file_rotate.max_file_size")
+        );
+    }
 
     #[rstest]
     fn test_file_writer_with_rotation_creates_new_timestamped_file() {
@@ -440,8 +718,10 @@ mod tests {
             "instance-123".to_string(),
             config,
             LevelFilter::Info,
+            false,
+            true,
         )
-            .unwrap();
+        .unwrap();
 
         assert_eq!(
             writer
@@ -453,6 +733,171 @@ mod tests {
             0
         );
         assert!(writer.path.to_str().unwrap().contains("test_"));
+    }
+
+    fn fixed_rotation_time(millis: u32) -> Timestamp {
+        Offset::UTC
+            .to_timestamp(Date::new(2024, 1, 15).unwrap().at(
+                10,
+                30,
+                45,
+                i32::try_from(millis).unwrap() * 1_000_000,
+            ))
+            .unwrap()
+    }
+
+    #[rstest]
+    fn test_create_log_file_path_with_rotation_uses_portable_separator() {
+        let temp_dir = tempdir().unwrap();
+
+        let config = FileWriterConfig {
+            directory: Some(temp_dir.path().to_str().unwrap().to_string()),
+            file_name: Some("test".to_string()),
+            file_format: None,
+            file_rotate: Some(FileRotateConfig::from((2000, 5))),
+        };
+
+        let path = FileWriter::create_log_file_path(
+            &config,
+            "TRADER-001",
+            "instance-123",
+            false,
+            fixed_rotation_time(123),
+        )
+        .unwrap();
+
+        let file_name = path.file_name().unwrap().to_str().unwrap();
+        assert_eq!(file_name, "test_2024-01-15_103045-123.log");
+    }
+
+    #[rstest]
+    fn test_create_log_file_path_with_rotation_default_name_uses_portable_separator() {
+        let config = FileWriterConfig {
+            directory: None,
+            file_name: None,
+            file_format: None,
+            file_rotate: Some(FileRotateConfig::from((2000, 5))),
+        };
+
+        let path = FileWriter::create_log_file_path(
+            &config,
+            "TRADER-001",
+            "instance-123",
+            false,
+            fixed_rotation_time(123),
+        )
+        .unwrap();
+
+        let file_name = path.file_name().unwrap().to_str().unwrap();
+        assert_eq!(
+            file_name,
+            "TRADER-001_2024-01-15_103045-123_instance-123.log"
+        );
+    }
+
+    #[rstest]
+    fn test_rotate_file_same_millisecond_preserves_active_file() {
+        let temp_dir = tempdir().unwrap();
+
+        let config = FileWriterConfig {
+            directory: Some(temp_dir.path().to_str().unwrap().to_string()),
+            file_name: Some("test".to_string()),
+            file_format: None,
+            file_rotate: Some(FileRotateConfig::from((2000, 0))),
+        };
+
+        let mut writer = FileWriter::new(
+            "TRADER-001".to_string(),
+            "instance-123".to_string(),
+            config,
+            LevelFilter::Info,
+            false,
+            true,
+        )
+        .unwrap();
+
+        let fixed = fixed_rotation_time(123);
+        writer.rotate_file_at(fixed);
+
+        let active_path = writer.path.clone();
+        assert!(active_path.exists());
+
+        // A second rotation within the same millisecond resolves to the same path and
+        // must not replace, enqueue, or delete the active file.
+        writer.rotate_file_at(fixed);
+
+        assert_eq!(writer.path, active_path);
+        assert!(active_path.exists());
+
+        writer.write("still logging\n");
+        writer.flush_and_sync().unwrap();
+
+        assert!(active_path.exists());
+        let contents = std::fs::read_to_string(&active_path).unwrap();
+        assert!(contents.contains("still logging"));
+    }
+
+    #[rstest]
+    fn test_rotate_file_date_based_updates_file_and_creation_date() {
+        let temp_dir = tempdir().unwrap();
+
+        let config = FileWriterConfig {
+            directory: Some(temp_dir.path().to_str().unwrap().to_string()),
+            file_name: None,
+            file_format: None,
+            file_rotate: None,
+        };
+
+        let mut writer = FileWriter::new(
+            "TRADER-001".to_string(),
+            "instance-123".to_string(),
+            config,
+            LevelFilter::Info,
+            false,
+            true,
+        )
+        .unwrap();
+
+        writer.rotate_file_at(fixed_rotation_time(123));
+
+        assert_eq!(writer.cur_file_date, utc_date(fixed_rotation_time(123)));
+        let file_name = writer.path.file_name().unwrap().to_str().unwrap();
+        assert_eq!(file_name, "TRADER-001_2024-01-15_instance-123.log");
+    }
+
+    #[rstest]
+    fn test_rotate_file_removes_previous_file_when_backup_count_zero() {
+        let temp_dir = tempdir().unwrap();
+
+        let config = FileWriterConfig {
+            directory: Some(temp_dir.path().to_str().unwrap().to_string()),
+            file_name: Some("test".to_string()),
+            file_format: None,
+            file_rotate: Some(FileRotateConfig::from((2000, 0))),
+        };
+
+        let mut writer = FileWriter::new(
+            "TRADER-001".to_string(),
+            "instance-123".to_string(),
+            config,
+            LevelFilter::Info,
+            false,
+            true,
+        )
+        .unwrap();
+
+        writer.rotate_file_at(fixed_rotation_time(123));
+        let first_path = writer.path.clone();
+        assert!(first_path.exists());
+
+        writer.rotate_file_at(fixed_rotation_time(124));
+
+        assert_ne!(writer.path, first_path);
+        assert!(
+            !first_path.exists(),
+            "previous rotated file should be removed with zero backup count"
+        );
+        assert!(writer.path.exists());
     }
 
     #[rstest]
@@ -470,13 +915,272 @@ mod tests {
 
     #[rstest]
     #[case("Plain text", "Plain text")]
-    #[case("\x1B[31mRed\x1B[0m", "[31mRed[0m")]
-    #[case("\x1B[1;32mBold Green\x1B[0m", "[1;32mBold Green[0m")]
-    #[case("Before\x1B[0mAfter", "Before[0mAfter")]
-    #[case("\x1B]0;Title\x07Content", "]0;TitleContent")]
-    #[case("Text\t\x1B[31mRed\x1B[0m", "Text[31mRed[0m")]
-    fn test_strip_ansi_codes(#[case] input: &str, #[case] expected: &str) {
-        let result = strip_ansi_codes(input);
+    #[case("\x1B[31mRed\x1B[0m", "Red")]
+    #[case("\x1B[1;32mBold Green\x1B[0m", "Bold Green")]
+    #[case("Before\x1B[0mAfter", "BeforeAfter")]
+    #[case("\x1B]0;Title\x07Content", "Content")]
+    #[case("Text\t\x1B[31mRed\x1B[0m", "TextRed")]
+    #[case("Broken\x1B[31", "Broken[31")]
+    #[case("Broken\x1B]Title", "Broken]Title")]
+    fn test_sanitize_file_line(#[case] input: &str, #[case] expected: &str) {
+        let result = sanitize_file_line(input);
         assert_eq!(result, expected);
+    }
+
+    #[rstest]
+    fn test_sanitize_file_line_borrows_clean_input() {
+        let result = sanitize_file_line("Plain text\n");
+
+        assert!(matches!(result, Cow::Borrowed(_)));
+    }
+
+    #[rstest]
+    fn test_file_writer_unwritable_directory_returns_none() {
+        let config = FileWriterConfig {
+            directory: Some("/nonexistent/path/that/should/not/exist".to_string()),
+            file_name: Some("test".to_string()),
+            file_format: None,
+            file_rotate: None,
+        };
+
+        let writer = FileWriter::new(
+            "TRADER-001".to_string(),
+            "instance-123".to_string(),
+            config,
+            LevelFilter::Info,
+            false,
+            true,
+        );
+
+        assert!(writer.is_none());
+    }
+
+    #[rstest]
+    fn test_file_writer_directory_is_file_returns_none() {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("not_a_directory");
+        std::fs::write(&file_path, "I am a file").unwrap();
+
+        let config = FileWriterConfig {
+            directory: Some(file_path.to_str().unwrap().to_string()),
+            file_name: Some("test".to_string()),
+            file_format: None,
+            file_rotate: None,
+        };
+
+        let writer = FileWriter::new(
+            "TRADER-001".to_string(),
+            "instance-123".to_string(),
+            config,
+            LevelFilter::Info,
+            false,
+            true,
+        );
+
+        assert!(writer.is_none());
+    }
+
+    #[rstest]
+    fn test_file_writer_unrecognized_format_defaults_to_text() {
+        let temp_dir = tempdir().unwrap();
+
+        let config = FileWriterConfig {
+            directory: Some(temp_dir.path().to_str().unwrap().to_string()),
+            file_name: Some("test".to_string()),
+            file_format: Some("invalid_format".to_string()),
+            file_rotate: None,
+        };
+
+        let writer = FileWriter::new(
+            "TRADER-001".to_string(),
+            "instance-123".to_string(),
+            config,
+            LevelFilter::Info,
+            false,
+            true,
+        )
+        .unwrap();
+
+        assert!(!writer.json_format);
+        assert_eq!(writer.path.extension().unwrap(), "log");
+    }
+
+    #[rstest]
+    fn test_file_writer_json_format() {
+        let temp_dir = tempdir().unwrap();
+
+        let config = FileWriterConfig {
+            directory: Some(temp_dir.path().to_str().unwrap().to_string()),
+            file_name: Some("test".to_string()),
+            file_format: Some("json".to_string()),
+            file_rotate: None,
+        };
+
+        let writer = FileWriter::new(
+            "TRADER-001".to_string(),
+            "instance-123".to_string(),
+            config,
+            LevelFilter::Info,
+            false,
+            true,
+        )
+        .unwrap();
+
+        assert!(writer.json_format);
+        assert_eq!(writer.path.extension().unwrap(), "jsonl");
+    }
+
+    #[rstest]
+    fn test_file_writer_clear_log_file_truncates_existing_file() {
+        let temp_dir = tempdir().unwrap();
+
+        let config = FileWriterConfig {
+            directory: Some(temp_dir.path().to_str().unwrap().to_string()),
+            file_name: Some("test".to_string()),
+            file_format: None,
+            file_rotate: None,
+        };
+
+        let existing_path = temp_dir.path().join("test.log");
+        std::fs::write(&existing_path, "stale contents").unwrap();
+        assert_eq!(
+            std::fs::metadata(&existing_path).unwrap().len(),
+            "stale contents".len() as u64
+        );
+
+        let writer = FileWriter::new(
+            "TRADER-001".to_string(),
+            "instance-123".to_string(),
+            config,
+            LevelFilter::Info,
+            true,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(writer.path, existing_path);
+        assert_eq!(std::fs::metadata(&existing_path).unwrap().len(), 0);
+    }
+
+    #[rstest]
+    fn test_file_writer_clear_log_file_false_preserves_existing_file() {
+        let temp_dir = tempdir().unwrap();
+
+        let config = FileWriterConfig {
+            directory: Some(temp_dir.path().to_str().unwrap().to_string()),
+            file_name: Some("test".to_string()),
+            file_format: None,
+            file_rotate: None,
+        };
+
+        let existing_path = temp_dir.path().join("test.log");
+        let existing_contents = "preserved contents";
+        std::fs::write(&existing_path, existing_contents).unwrap();
+
+        let writer = FileWriter::new(
+            "TRADER-001".to_string(),
+            "instance-123".to_string(),
+            config,
+            LevelFilter::Info,
+            false,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(writer.path, existing_path);
+        assert_eq!(
+            std::fs::read_to_string(&existing_path).unwrap(),
+            existing_contents
+        );
+    }
+
+    #[rstest]
+    fn test_file_writer_sync_on_flush_can_be_disabled() {
+        let temp_dir = tempdir().unwrap();
+
+        let config = FileWriterConfig {
+            directory: Some(temp_dir.path().to_str().unwrap().to_string()),
+            file_name: Some("test".to_string()),
+            file_format: None,
+            file_rotate: None,
+        };
+
+        let mut writer = FileWriter::new(
+            "TRADER-001".to_string(),
+            "instance-123".to_string(),
+            config,
+            LevelFilter::Info,
+            false,
+            false,
+        )
+        .unwrap();
+
+        assert!(!writer.sync_on_flush);
+        writer.write("hello\n");
+        writer.flush();
+        writer.flush_and_sync().unwrap();
+    }
+
+    #[rstest]
+    fn test_stdout_writer_filters_error_level() {
+        let writer = StdoutWriter::new(LevelFilter::Info, true, false);
+
+        // Error level should NOT be enabled for stdout (goes to stderr)
+        let error_line = LogLine {
+            timestamp: 0.into(),
+            level: log::Level::Error,
+            color: crate::enums::LogColor::Normal,
+            component: ustr::Ustr::from("Test"),
+            message: "error".to_string(),
+            fields: SmallVec::new(),
+        };
+        assert!(!writer.enabled(&error_line));
+
+        // Info level should be enabled
+        let info_line = LogLine {
+            timestamp: 0.into(),
+            level: log::Level::Info,
+            color: crate::enums::LogColor::Normal,
+            component: ustr::Ustr::from("Test"),
+            message: "info".to_string(),
+            fields: SmallVec::new(),
+        };
+        assert!(writer.enabled(&info_line));
+
+        // Debug should NOT be enabled when stdout level is Info
+        let debug_line = LogLine {
+            timestamp: 0.into(),
+            level: log::Level::Debug,
+            color: crate::enums::LogColor::Normal,
+            component: ustr::Ustr::from("Test"),
+            message: "debug".to_string(),
+            fields: SmallVec::new(),
+        };
+        assert!(!writer.enabled(&debug_line));
+    }
+
+    #[rstest]
+    fn test_stderr_writer_only_enables_error_level() {
+        let writer = StderrWriter::new(true);
+
+        let error_line = LogLine {
+            timestamp: 0.into(),
+            level: log::Level::Error,
+            color: crate::enums::LogColor::Normal,
+            component: ustr::Ustr::from("Test"),
+            message: "error".to_string(),
+            fields: SmallVec::new(),
+        };
+        assert!(writer.enabled(&error_line));
+
+        let warn_line = LogLine {
+            timestamp: 0.into(),
+            level: log::Level::Warn,
+            color: crate::enums::LogColor::Normal,
+            component: ustr::Ustr::from("Test"),
+            message: "warn".to_string(),
+            fields: SmallVec::new(),
+        };
+        assert!(!writer.enabled(&warn_line));
     }
 }

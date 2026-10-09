@@ -1,0 +1,135 @@
+[package]
+name = "nice-live"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Core live trading components and machinery for the nice trading engine"
+categories.workspace = true
+keywords.workspace = true
+documentation.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "nice_live"
+crate-type = ["rlib"]
+
+[features]
+default = ["node", "plugin"]
+fuzz = ["dep:libfuzzer-sys"]
+node = [
+  "dep:nice-data",
+  "dep:nice-portfolio",
+  "dep:nice-risk",
+  "dep:nice-system",
+  "dep:nice-trading",
+]
+plugin = ["node"]
+examples = ["node", "dep:nice-testkit", "nice-trading/examples"]
+streaming = ["node", "nice-persistence", "nice-system/streaming"]
+extension-module = [
+  "streaming",
+]
+
+defi = [
+  "dep:nice-data",
+  "nice-common/defi",
+  "nice-data/defi",
+  "nice-persistence?/defi",
+]
+simulation = [
+  "node",
+  "nice-common/simulation",
+  "nice-execution/simulation",
+]
+test-support = [
+  "dep:nice-portfolio",
+  "dep:nice-risk",
+  "dep:nice-testkit",
+  "dep:nice-trading",
+]
+
+[package.metadata.cargo-machete]
+ignored = [
+  "nice-persistence",
+] # Optional dep activated only via the streaming feature
+
+[package.metadata.docs.rs]
+# Python docs depend on the local pyo3-stub-gen patch for now, which published crates do not carry
+features = ["defi", "examples", "node", "plugin", "simulation", "streaming"]
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+nice-common = { workspace = true, features = ["live"] }
+nice-core = { workspace = true }
+nice-execution = { workspace = true }
+nice-model = { workspace = true }
+nice-network = { workspace = true }
+
+nice-data = { workspace = true, optional = true }
+nice-persistence = { workspace = true, optional = true }
+nice-portfolio = { workspace = true, optional = true }
+nice-risk = { workspace = true, optional = true }
+nice-system = { workspace = true, features = ["live"], optional = true }
+nice-testkit = { workspace = true, default-features = false, features = [
+  "testers",
+], optional = true }
+nice-trading = { workspace = true, optional = true }
+
+ahash = { workspace = true }
+anyhow = { workspace = true }
+arc-swap = { workspace = true }
+async-trait = { workspace = true }
+bon = { workspace = true }
+futures-util = { workspace = true }
+indexmap = { workspace = true }
+libfuzzer-sys = { workspace = true, optional = true }
+log = { workspace = true }
+parking_lot = { workspace = true }
+rust_decimal = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tabled = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true, features = ["rt"] }
+ustr = { workspace = true }
+
+pyo3 = { workspace = true, optional = true }
+pyo3-stub-gen = { workspace = true, optional = true }
+
+[dev-dependencies]
+nice-model = { workspace = true, features = ["test-support"] }
+nice-testkit = { workspace = true, default-features = false, features = [
+  "testers",
+] }
+
+bytes = { workspace = true }
+criterion = { workspace = true }
+madsim = { workspace = true }
+proptest = { workspace = true }
+rstest = { workspace = true }
+rust_decimal_macros = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "macros", "rt"] }
+toml = { workspace = true }
+ustr = { workspace = true }
+
+# Run with `cargo bench -p nice-live --bench runner`
+[[bench]]
+name = "runner"
+harness = false
+
+# Run with `cargo bench -p nice-live --bench queue_monitor`
+[[bench]]
+name = "queue_monitor"
+harness = false
+required-features = ["node"]
+
+[[test]]
+name = "integration"
+path = "tests/integration/main.rs"
+required-features = ["node"]

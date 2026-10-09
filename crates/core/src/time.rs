@@ -1,17 +1,26 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2025 dyntrait. All rights reserved.
-//
-//  @File         : time.rs
-//  @Author       : dyntrait
-//  @Description  :
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
-//! Core utilities for the Nice project.
+
+
+//! The core `AtomicTime` for real-time and static clocks.
+//!
+//! This module provides an atomic time abstraction that supports both real-time and static
+//! clocks. It ensures thread-safe operations and monotonic time retrieval with nanosecond precision.
+//!
+//! # Modes
+//!
+//! - **Real-time mode:** The clock continuously syncs with system wall-clock time (via
+//!   [`SystemTime::now()`]). To ensure strict monotonic increments across multiple threads,
+//!   the internal updates use an atomic compare-and-exchange loop (`time_since_epoch`).
+//!   While this guarantees that every new timestamp is at least one nanosecond greater than the
+//!   last, it may introduce higher contention if many threads call it heavily.
+//!
+//! - **Static mode:** The clock is manually controlled via [`AtomicTime::set_time`] or [`AtomicTime::increment_time`],
+//!   which can be useful for simulations or backtesting. You can switch modes at runtime using
+//!   [`AtomicTime::make_realtime`] or [`AtomicTime::make_static`]. In **static mode**, we use
+//!   acquire/release semantics so that updates from one thread can be observed by another;
+//!   however, we do not enforce strict global ordering for manual updates. If you need strong,
+//!   multi-threaded ordering in **static mode**, you must coordinate higher-level synchronization yourself.
+
 use std::{
-    ops::Deref,
     sync::{
         OnceLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -20,7 +29,7 @@ use std::{
 };
 
 use crate::{
-    UnixNanos,
+    DurationNanos, UnixNanos,
     datetime::{NANOSECONDS_IN_MICROSECOND, NANOSECONDS_IN_MILLISECOND, NANOSECONDS_IN_SECOND},
 };
 
@@ -60,14 +69,46 @@ pub fn get_atomic_clock_static() -> &'static AtomicTime {
 #[inline(always)]
 #[must_use]
 pub fn duration_since_unix_epoch() -> Duration {
-    // SAFETY: The expect() is acceptable here because:
+    // The expect() is acceptable here because:
     // - SystemTime failure indicates catastrophic system clock issues
     // - This would affect the entire application's ability to function
     // - Alternative error handling would complicate all time-dependent code paths
     // - Such failures are extremely rare in practice and indicate hardware/OS problems
-    SystemTime::now()
+    wall_clock_now()
         .duration_since(UNIX_EPOCH)
         .expect("Error calling `SystemTime`")
+}
+
+/// Returns the current wall-clock time as [`SystemTime`].
+///
+/// Under simulation (`simulation` + `cfg(madsim)`), returns virtual wall-clock
+/// time from the madsim deterministic scheduler when called from inside a
+/// madsim runtime. When called outside a runtime (e.g. plain `#[rstest]` test
+/// bodies), falls back to [`SystemTime::now()`], which under `cfg(madsim)` is
+/// libc-intercepted by madsim and resolves to the same real syscall it would
+/// in a normal build. Under normal builds, returns [`SystemTime::now()`].
+///
+/// This is the wall-clock seam. It preserves Unix-epoch semantics (unlike
+/// `tokio::time::Instant` which is monotonic and carries no epoch).
+#[inline(always)]
+#[must_use]
+fn wall_clock_now() -> SystemTime {
+    #[cfg(not(all(feature = "simulation", madsim)))]
+    {
+        SystemTime::now()
+    }
+    #[cfg(all(feature = "simulation", madsim))]
+    {
+        // `try_current` returns `None` when no madsim runtime is active.
+        // Falling back to `SystemTime::now()` matches what madsim's own libc
+        // shim does for `clock_gettime` outside a runtime; production paths
+        // running under simulation are always inside a runtime, so they
+        // continue to receive virtual time.
+        match madsim::time::TimeHandle::try_current() {
+            Some(handle) => handle.now_time(),
+            None => SystemTime::now(),
+        }
+    }
 }
 
 /// Returns the current UNIX time in nanoseconds, based on [`SystemTime::now()`].
@@ -78,12 +119,8 @@ pub fn duration_since_unix_epoch() -> Duration {
 #[inline(always)]
 #[must_use]
 pub fn nanos_since_unix_epoch() -> u64 {
-    let ns = duration_since_unix_epoch().as_nanos();
-    assert!(
-        ns <= u128::from(u64::MAX),
-        "System time overflow: value exceeds u64::MAX nanoseconds"
-    );
-    ns as u64
+    u64::try_from(duration_since_unix_epoch().as_nanos())
+        .expect("System time overflow: value exceeds u64::MAX nanoseconds")
 }
 
 /// Represents an atomic timekeeping structure.
@@ -96,22 +133,14 @@ pub fn nanos_since_unix_epoch() -> u64 {
 /// For concurrency, this struct uses atomic operations with appropriate memory orderings:
 /// - **Acquire/Release** for reading/writing in **static mode**.
 /// - **Compare-and-exchange (`AcqRel`)** in real-time mode to guarantee monotonic increments.
+///
+/// The mode flag and timestamp are private so every update flows through the methods
+/// that uphold the monotonicity and mode invariants.
 #[repr(C)]
 #[derive(Debug)]
 pub struct AtomicTime {
-    /// Indicates whether the clock is operating in **real-time mode** (`true`) or **static mode** (`false`)
-    pub realtime: AtomicBool,
-    /// The last recorded time (in UNIX nanoseconds). Updated atomically with compare-and-exchange
-    /// in **real-time mode**, or simple store/fetch in **static mode**.
-    pub timestamp_ns: AtomicU64,
-}
-
-impl Deref for AtomicTime {
-    type Target = AtomicU64;
-
-    fn deref(&self) -> &Self::Target {
-        &self.timestamp_ns
-    }
+    realtime: AtomicBool,
+    timestamp_ns: AtomicU64,
 }
 
 impl Default for AtomicTime {
@@ -124,25 +153,34 @@ impl Default for AtomicTime {
 impl AtomicTime {
     /// Creates a new [`AtomicTime`] instance.
     ///
-    /// - If `realtime` is `true`, the provided `time` is used only as an initial placeholder
-    ///   and will quickly be overridden by calls to [`AtomicTime::time_since_epoch`].
+    /// - If `realtime` is `true`, the provided `time` is ignored and the first read starts from
+    ///   the current system time.
     /// - If `realtime` is `false`, this clock starts in **static mode**, with the given `time`
     ///   as its current value.
     #[must_use]
     pub fn new(realtime: bool, time: UnixNanos) -> Self {
+        let timestamp_ns = if realtime { 0 } else { time.into() };
+
         Self {
             realtime: AtomicBool::new(realtime),
-            timestamp_ns: AtomicU64::new(time.into()),
+            timestamp_ns: AtomicU64::new(timestamp_ns),
         }
     }
 
-    /// Returns the current time in nanoseconds, based on the clock’s mode.
+    /// Returns the current time in nanoseconds, based on the clock's mode.
     ///
     /// - In **real-time mode**, calls [`AtomicTime::time_since_epoch`], ensuring strictly increasing
     ///   timestamps across threads, using `AcqRel` semantics for the underlying atomic.
     /// - In **static mode**, reads the stored time using [`Ordering::Acquire`]. Updates by other
     ///   threads using [`AtomicTime::set_time`] or [`AtomicTime::increment_time`] (Release/AcqRel)
     ///   will be visible here.
+    ///
+    /// # Thread Safety
+    ///
+    /// The mode check is not atomic with the subsequent read/update. If another thread
+    /// switches modes between the check and the operation, one stale-mode result may be
+    /// returned. This is intentional: mode switching is a setup-time operation and should
+    /// not occur concurrently with time operations.
     #[must_use]
     pub fn get_time_ns(&self) -> UnixNanos {
         if self.realtime.load(Ordering::Acquire) {
@@ -166,7 +204,7 @@ impl AtomicTime {
 
     /// Returns the current time as seconds.
     #[must_use]
-    #[allow(
+    #[expect(
         clippy::cast_precision_loss,
         reason = "Precision loss acceptable for time conversion"
     )]
@@ -174,7 +212,7 @@ impl AtomicTime {
         self.get_time_ns().as_f64() / (NANOSECONDS_IN_SECOND as f64)
     }
 
-    /// Manually sets a new time for the clock (only meaningful in **static mode**).
+    /// Manually sets a new time for the clock (only possible in **static mode**).
     ///
     /// This uses an atomic store with [`Ordering::Release`], so any thread reading with
     /// [`Ordering::Acquire`] will see the updated time. This does *not* enforce a total ordering
@@ -182,49 +220,75 @@ impl AtomicTime {
     /// sees all writes made before this call in the writing thread.
     ///
     /// Typically used in single-threaded scenarios or coordinated concurrency in **static mode**,
-    /// since there’s no global ordering across threads.
+    /// since there's no global ordering across threads.
     ///
     /// # Panics
     ///
     /// Panics if invoked when in real-time mode.
+    ///
+    /// # Thread Safety
+    ///
+    /// The mode check is not atomic with the subsequent store. If another thread calls
+    /// `make_realtime()` between the check and store, the invariant can be violated.
+    /// This is intentional: mode switching is a setup-time operation and should not
+    /// occur concurrently with time operations. Callers must ensure mode switches are
+    /// complete before resuming time operations.
     pub fn set_time(&self, time: UnixNanos) {
         assert!(
-            !self.realtime.load(Ordering::Acquire),
+            !self.realtime.load(Ordering::SeqCst),
             "Cannot set time while clock is in realtime mode"
         );
 
-        self.store(time.into(), Ordering::Release);
+        self.timestamp_ns.store(time.into(), Ordering::Release);
+
+        debug_assert!(
+            !self.realtime.load(Ordering::SeqCst),
+            "Invariant: clock must remain in static mode across `set_time`"
+        );
     }
 
-    /// Increments the current (static-mode) time by `delta` nanoseconds and returns the updated value.
+    /// Increments the current static-mode time by `delta` and returns the updated value.
     ///
-    /// Internally this uses [`AtomicU64::fetch_update`] with [`Ordering::AcqRel`] to ensure the increment is
+    /// Internally this uses [`AtomicU64::try_update`] with [`Ordering::AcqRel`] to ensure the increment is
     /// atomic and visible to readers using `Acquire` loads.
     ///
     /// # Errors
     ///
     /// Returns an error if the increment would overflow `u64::MAX` or if called
     /// while the clock is in real-time mode.
-    pub fn increment_time(&self, delta: u64) -> anyhow::Result<UnixNanos> {
+    ///
+    /// # Thread Safety
+    ///
+    /// The mode check is not atomic with the subsequent update. If another thread calls
+    /// `make_realtime()` between the check and update, the invariant can be violated.
+    /// This is intentional: mode switching is a setup-time operation and should not
+    /// occur concurrently with time operations. Callers must ensure mode switches are
+    /// complete before resuming time operations.
+    pub fn increment_time(&self, delta: DurationNanos) -> anyhow::Result<UnixNanos> {
         anyhow::ensure!(
-            !self.realtime.load(Ordering::Acquire),
+            !self.realtime.load(Ordering::SeqCst),
             "Cannot increment time while clock is in realtime mode"
         );
 
         let previous =
             match self
                 .timestamp_ns
-                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-                    current.checked_add(delta)
+                .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                    current.checked_add(delta.as_u64())
                 }) {
                 Ok(prev) => prev,
                 Err(_) => anyhow::bail!("Cannot increment time beyond u64::MAX"),
             };
 
-        Ok(UnixNanos::from(previous + delta))
+        debug_assert!(
+            !self.realtime.load(Ordering::SeqCst),
+            "Invariant: clock must remain in static mode across `increment_time`"
+        );
+
+        Ok(UnixNanos::from(previous) + delta)
     }
 
-    /// Retrieves and updates the current “real-time” clock, returning a strictly increasing
+    /// Retrieves and updates the current "real-time" clock, returning a strictly increasing
     /// timestamp based on system time.
     ///
     /// Internally:
@@ -249,14 +313,17 @@ impl AtomicTime {
         // This method guarantees strict consistency but may incur a performance cost under
         // high contention due to retries in the `compare_exchange` loop.
         let now = nanos_since_unix_epoch();
+
         loop {
             // Acquire to observe the latest stored value
-            let last = self.load(Ordering::Acquire);
-            // Ensure we never wrap past u64::MAX – treat that as a fatal error
+            let last = self.timestamp_ns.load(Ordering::Acquire);
+
+            // Ensure we never wrap past u64::MAX - treat that as a fatal error
             let incremented = last
                 .checked_add(1)
                 .expect("AtomicTime overflow: reached u64::MAX");
             let next = now.max(incremented);
+
             // AcqRel on success ensures this new value is published,
             // Acquire on failure reloads if we lost a CAS race.
             //
@@ -270,9 +337,14 @@ impl AtomicTime {
             //
             // The concurrent stress test (4 threads × 100k iterations) validates this approach.
             if self
+                .timestamp_ns
                 .compare_exchange(last, next, Ordering::AcqRel, Ordering::Acquire)
                 .is_ok()
             {
+                debug_assert!(
+                    next > last,
+                    "Invariant: time is strictly monotonic across CAS"
+                );
                 return UnixNanos::from(next);
             }
         }
@@ -280,20 +352,44 @@ impl AtomicTime {
 
     /// Switches the clock to **real-time mode** (`realtime = true`).
     ///
-    /// Uses [`Ordering::SeqCst`] for the mode store, which ensures a global ordering for the
-    /// mode switch if other threads also do `SeqCst` loads/stores of `realtime`.
-    /// Typically, switching modes is done infrequently, so the performance impact of `SeqCst`
-    /// here is acceptable.
+    /// If transitioning from static mode, the internal counter is reset to the current
+    /// wall-clock time so that [`AtomicTime::time_since_epoch`] does not carry forward a
+    /// timestamp set during static mode (e.g. a backtest far in the future).
+    ///
+    /// Uses [`Ordering::SeqCst`] for the mode flag to ensure global ordering.
+    ///
+    /// # Thread Safety
+    ///
+    /// The mode swap and the counter reset are two separate atomic operations. A thread
+    /// reading between them can observe real-time mode with the stale static-mode counter
+    /// and return a timestamp derived from it (potentially far in the future), after which
+    /// the reset moves the clock backwards. Mode switching is a setup-time operation and
+    /// must not run concurrently with time reads.
     pub fn make_realtime(&self) {
-        self.realtime.store(true, Ordering::SeqCst);
+        if !self.realtime.swap(true, Ordering::SeqCst) {
+            self.timestamp_ns
+                .store(nanos_since_unix_epoch(), Ordering::Release);
+        }
     }
 
     /// Switches the clock to **static mode** (`realtime = false`).
     ///
-    /// Uses [`Ordering::SeqCst`] for the mode store, which ensures a global ordering for the
-    /// mode switch if other threads also do `SeqCst` loads/stores of `realtime`.
+    /// If transitioning from real-time mode, the internal counter is snapshotted to the
+    /// current wall-clock time so that subsequent static reads return a reasonable value
+    /// rather than a stale or zero placeholder.
+    ///
+    /// Uses [`Ordering::SeqCst`] for the mode flag to ensure global ordering.
+    ///
+    /// # Thread Safety
+    ///
+    /// The mode swap and the counter snapshot are two separate atomic operations; see
+    /// [`AtomicTime::make_realtime`] for the race this implies. Mode switching is a
+    /// setup-time operation and must not run concurrently with time reads.
     pub fn make_static(&self) {
-        self.realtime.store(false, Ordering::SeqCst);
+        if self.realtime.swap(false, Ordering::SeqCst) {
+            self.timestamp_ns
+                .store(nanos_since_unix_epoch(), Ordering::Release);
+        }
     }
 }
 
@@ -304,6 +400,7 @@ mod tests {
     use rstest::*;
 
     use super::*;
+    use crate::DurationNanos;
 
     #[rstest]
     fn test_global_clocks_initialization() {
@@ -345,7 +442,7 @@ mod tests {
     #[rstest]
     fn test_increment_time_returns_error_in_realtime_mode() {
         let clock = AtomicTime::new(true, UnixNanos::default());
-        let result = clock.increment_time(1);
+        let result = clock.increment_time(DurationNanos::new(1));
         assert!(result.is_err());
         assert!(
             result
@@ -371,32 +468,60 @@ mod tests {
     }
 
     #[rstest]
-    fn test_mode_switching_concurrent() {
-        let clock = Arc::new(AtomicTime::new(true, UnixNanos::default()));
-        let num_threads = 4;
-        let iterations = 10000;
-        let mut handles = Vec::with_capacity(num_threads);
+    fn test_new_realtime_ignores_initial_time() {
+        let before = nanos_since_unix_epoch();
+        let clock = AtomicTime::new(true, UnixNanos::from(u64::MAX));
+        let timestamp = clock.get_time_ns().as_u64();
+        let after = nanos_since_unix_epoch();
 
-        for _ in 0..num_threads {
-            let clock_clone = Arc::clone(&clock);
-            let handle = std::thread::spawn(move || {
-                for i in 0..iterations {
-                    if i % 2 == 0 {
-                        clock_clone.make_static();
-                    } else {
-                        clock_clone.make_realtime();
-                    }
-                    // Retrieve the time; we’re not asserting a particular value here,
-                    // but at least we’re exercising the mode switch logic under concurrency.
-                    let _ = clock_clone.get_time_ns();
-                }
-            });
-            handles.push(handle);
-        }
+        assert!(timestamp >= before);
+        assert!(timestamp <= after);
+    }
 
-        for handle in handles {
-            handle.join().unwrap();
-        }
+    #[rstest]
+    fn test_make_static_snapshots_wall_time() {
+        // A fresh realtime clock that has never been read starts with timestamp_ns = 0.
+        // Switching to static should snapshot wall time, not leave it at 0.
+        let clock = AtomicTime::new(true, UnixNanos::default());
+        clock.make_static();
+        let ts = clock.get_time_ns();
+        assert!(
+            ts.as_u64() > 1_650_000_000_000_000_000,
+            "Expected wall-clock snapshot, was {ts}"
+        );
+    }
+
+    #[rstest]
+    fn test_make_realtime_resets_future_timestamp() {
+        // If static mode set the clock into the future, switching to realtime
+        // should reset to wall time so timestamps are not poisoned.
+        let clock = AtomicTime::new(false, UnixNanos::from(u64::MAX - 1_000));
+        clock.make_realtime();
+        let ts = clock.get_time_ns();
+        // Should be near current wall time, not near u64::MAX
+        let now = nanos_since_unix_epoch();
+        assert!(
+            ts.as_u64() <= now + 1_000_000_000, // within 1 second
+            "Expected wall-clock time, was {ts} (now={now})"
+        );
+    }
+
+    #[rstest]
+    fn test_make_static_idempotent() {
+        // Calling make_static on an already-static clock should not change the time
+        let clock = AtomicTime::new(false, UnixNanos::from(42));
+        clock.make_static();
+        assert_eq!(clock.get_time_ns(), UnixNanos::from(42));
+    }
+
+    #[rstest]
+    fn test_make_realtime_idempotent() {
+        // Calling make_realtime on an already-realtime clock should not reset the counter
+        let clock = AtomicTime::new(true, UnixNanos::default());
+        let ts1 = clock.get_time_ns();
+        clock.make_realtime(); // already realtime, should be a no-op
+        let ts2 = clock.get_time_ns();
+        assert!(ts2 >= ts1);
     }
 
     #[rstest]
@@ -418,10 +543,10 @@ mod tests {
         // Start in static mode
         let time = AtomicTime::new(false, UnixNanos::from(0));
 
-        let updated_time = time.increment_time(500).unwrap();
+        let updated_time = time.increment_time(DurationNanos::new(500)).unwrap();
         assert_eq!(updated_time.as_u64(), 500);
 
-        let updated_time = time.increment_time(1_000).unwrap();
+        let updated_time = time.increment_time(DurationNanos::new(1_000)).unwrap();
         assert_eq!(updated_time.as_u64(), 1_500);
     }
 
@@ -429,20 +554,26 @@ mod tests {
     fn test_increment_time_overflow_errors() {
         let time = AtomicTime::new(false, UnixNanos::from(u64::MAX - 5));
 
-        let err = time.increment_time(10).unwrap_err();
+        let err = time.increment_time(DurationNanos::new(10)).unwrap_err();
         assert_eq!(err.to_string(), "Cannot increment time beyond u64::MAX");
     }
 
     #[rstest]
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_possible_wrap,
-        reason = "Intentional cast for Python interop"
-    )]
+    fn test_increment_time_after_make_static() {
+        // Switching from realtime snapshots wall time; increments build on the snapshot
+        let clock = AtomicTime::new(true, UnixNanos::default());
+        clock.make_static();
+        let before = clock.get_time_ns();
+        let after = clock.increment_time(DurationNanos::new(1_000)).unwrap();
+        assert_eq!(after, before + DurationNanos::new(1_000));
+        assert_eq!(clock.get_time_ns(), after);
+    }
+
+    #[rstest]
     fn test_nanos_since_unix_epoch_vs_system_time() {
         let unix_nanos = nanos_since_unix_epoch();
-        let system_ns = duration_since_unix_epoch().as_nanos() as u64;
-        assert!((unix_nanos as i64 - system_ns as i64).abs() < NANOSECONDS_IN_SECOND as i64);
+        let system_ns = u64::try_from(duration_since_unix_epoch().as_nanos()).unwrap();
+        assert!(unix_nanos.abs_diff(system_ns) < NANOSECONDS_IN_SECOND);
     }
 
     #[rstest]
@@ -501,7 +632,7 @@ mod tests {
         assert!(delta.unwrap_or_default() < Duration::from_millis(100));
 
         // Check if the duration is greater than a certain value (assuming the test is run after that point)
-        assert!(duration > Duration::from_secs(1_650_000_000));
+        assert!(duration > Duration::from_mins(27_500_000));
     }
 
     #[rstest]
@@ -656,7 +787,7 @@ mod tests {
 
     #[rstest]
     fn test_acquire_release_contract_increment_time() {
-        // Similar test for increment_time, which uses fetch_update with AcqRel (see AtomicTime::increment_time)
+        // Similar test for increment_time, which uses try_update with AcqRel (see AtomicTime::increment_time)
 
         let clock = Arc::new(AtomicTime::new(false, UnixNanos::from(0)));
         let aux_data = Arc::new(AtomicU64::new(0));
@@ -669,7 +800,9 @@ mod tests {
         let writer = std::thread::spawn(move || {
             for i in 1..=1_000u64 {
                 writer_aux.store(i, Ordering::Relaxed);
-                let _ = writer_clock.increment_time(1000).unwrap();
+                let _ = writer_clock
+                    .increment_time(DurationNanos::new(1000))
+                    .unwrap();
                 std::thread::yield_now();
             }
             writer_done.store(true, Ordering::Release);
@@ -726,5 +859,26 @@ mod tests {
 
         // Ensure the reader actually observed updates (not vacuously satisfied)
         assert!(max_observed > 0, "Reader must observe writer updates");
+    }
+
+    // The wall-clock seam (`wall_clock_now`) routes through madsim's virtual
+    // clock under simulation. Sleeping for 60 virtual seconds must advance
+    // the value returned by `nanos_since_unix_epoch` by 60s in wall-clock
+    // terms. If the cfg gate fell through to `SystemTime::now()`, the elapsed
+    // value would only reflect real wall-clock time (~0ms) and the assertion
+    // would fail.
+    #[cfg(all(feature = "simulation", madsim))]
+    #[madsim::test]
+    async fn test_wall_clock_advances_with_virtual_time() {
+        let before = nanos_since_unix_epoch();
+        madsim::time::sleep(std::time::Duration::from_mins(1)).await;
+        let after = nanos_since_unix_epoch();
+
+        let elapsed_ns = after.saturating_sub(before);
+        let sixty_seconds_ns = 60 * NANOSECONDS_IN_SECOND;
+        assert!(
+            elapsed_ns >= sixty_seconds_ns,
+            "wall clock did not advance by full virtual sleep: elapsed={elapsed_ns}ns"
+        );
     }
 }

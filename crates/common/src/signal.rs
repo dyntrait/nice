@@ -1,18 +1,10 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : signal.rs
-//  @Author       : dyntrait Created On 2026/1/5 15:22
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
 
 //! A user signal type.
 
-use nice::UnixNanos;
+use std::{any::Any, sync::Arc};
+
+use nice_core::UnixNanos;
+use nice_model::data::{HasTsInit, custom::CustomDataTrait};
 use serde::{Deserialize, Serialize};
 use ustr::Ustr;
 
@@ -21,7 +13,11 @@ use ustr::Ustr;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "python",
-    pyo3::pyclass(module = "nautilus_trader.core.nautilus_pyo3.common")
+    pyo3::pyclass(module = "nice_trader.common", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nice_trader.common")
 )]
 pub struct Signal {
     pub name: Ustr,
@@ -40,5 +36,46 @@ impl Signal {
             ts_event,
             ts_init,
         }
+    }
+}
+
+impl HasTsInit for Signal {
+    fn ts_init(&self) -> UnixNanos {
+        self.ts_init
+    }
+}
+
+impl CustomDataTrait for Signal {
+    fn type_name(&self) -> &'static str {
+        "Signal"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn ts_event(&self) -> UnixNanos {
+        self.ts_event
+    }
+
+    fn to_json(&self) -> anyhow::Result<String> {
+        Ok(serde_json::to_string(self)?)
+    }
+
+    fn clone_arc(&self) -> Arc<dyn CustomDataTrait> {
+        Arc::new(self.clone())
+    }
+
+    fn eq_arc(&self, other: &dyn CustomDataTrait) -> bool {
+        other
+            .as_any()
+            .downcast_ref::<Self>()
+            .is_some_and(|o| self == o)
+    }
+
+    #[cfg(feature = "python")]
+    fn to_pyobject(&self, py: pyo3::Python<'_>) -> pyo3::PyResult<pyo3::Py<pyo3::PyAny>> {
+        use pyo3::IntoPyObjectExt;
+        self.clone().into_py_any(py)
     }
 }

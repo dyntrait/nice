@@ -1,21 +1,9 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2026  dyntrait  All rights reserved.
-//  All Rights Reserved
-//
-//  @File         : signing.rs
-//  @Author       : dyntrait
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
 
 
 use aws_lc_rs::{hmac, rand as lc_rand, rsa::KeyPair, signature as lc_signature};
 use base64::prelude::*;
 use ed25519_dalek::{Signature as Ed25519Signature, Signer, SigningKey};
-use hex;
+use nice_core::hex;
 
 /// Generates an HMAC-SHA256 signature for the given data using the provided secret.
 ///
@@ -135,7 +123,7 @@ mod tests {
 
     #[rstest]
     #[case(
-        r"-----BEGIN TEST KEY-----
+        "-----BEGIN TEST KEY-----
 MIIBVwIBADANBgkqhkiG9w0BAQEFAASCATswggE3AgEAAkEAu/...
 -----END PRIVATE KEY-----",
         ""
@@ -150,7 +138,7 @@ MIIBVwIBADANBgkqhkiG9w0BAQEFAASCATswggE3AgEAAkEAu/...
 
     #[rstest]
     #[case(
-        r"-----BEGIN INVALID KEY-----
+        "-----BEGIN INVALID KEY-----
 INVALID_KEY_DATA
 -----END INVALID KEY-----",
         "This is a test query"

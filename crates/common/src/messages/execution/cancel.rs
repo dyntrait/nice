@@ -1,20 +1,8 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : cancel.rs
-//  @Author       : dyntrait Created On 2026/1/5 16:08
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
 
 use std::fmt::Display;
 
 use derive_builder::Builder;
-use indexmap::IndexMap;
-use nice_core::{UUID4, UnixNanos};
+use nice_core::{Params, UUID4, UnixNanos};
 use nice_model::{
     enums::OrderSide,
     identifiers::{ClientId, ClientOrderId, InstrumentId, StrategyId, TraderId, VenueOrderId},
@@ -32,12 +20,17 @@ pub struct CancelOrder {
     pub venue_order_id: Option<VenueOrderId>,
     pub command_id: UUID4,
     pub ts_init: UnixNanos,
-    pub params: Option<IndexMap<String, String>>,
+    pub params: Option<Params>,
+    #[builder(default)]
+    pub correlation_id: Option<UUID4>,
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub causation_id: Option<UUID4>,
 }
 
 impl CancelOrder {
     /// Creates a new [`CancelOrder`] instance.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
         trader_id: TraderId,
@@ -48,7 +41,8 @@ impl CancelOrder {
         venue_order_id: Option<VenueOrderId>,
         command_id: UUID4,
         ts_init: UnixNanos,
-        params: Option<IndexMap<String, String>>,
+        params: Option<Params>,
+        correlation_id: Option<UUID4>,
     ) -> Self {
         Self {
             trader_id,
@@ -60,6 +54,8 @@ impl CancelOrder {
             command_id,
             ts_init,
             params,
+            correlation_id,
+            causation_id: None,
         }
     }
 }
@@ -81,25 +77,32 @@ pub struct CancelAllOrders {
     pub client_id: Option<ClientId>,
     pub strategy_id: StrategyId,
     pub instrument_id: InstrumentId,
-    pub order_side: OrderSide,
+    #[serde(with = "nice_model::enums::serde_option_order_side")]
+    pub order_side: Option<OrderSide>,
     pub command_id: UUID4,
     pub ts_init: UnixNanos,
-    pub params: Option<IndexMap<String, String>>,
+    pub params: Option<Params>,
+    #[builder(default)]
+    pub correlation_id: Option<UUID4>,
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub causation_id: Option<UUID4>,
 }
 
 impl CancelAllOrders {
     /// Creates a new [`CancelAllOrders`] instance.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
         trader_id: TraderId,
         client_id: Option<ClientId>,
         strategy_id: StrategyId,
         instrument_id: InstrumentId,
-        order_side: OrderSide,
+        order_side: Option<OrderSide>,
         command_id: UUID4,
         ts_init: UnixNanos,
-        params: Option<IndexMap<String, String>>,
+        params: Option<Params>,
+        correlation_id: Option<UUID4>,
     ) -> Self {
         Self {
             trader_id,
@@ -110,16 +113,22 @@ impl CancelAllOrders {
             command_id,
             ts_init,
             params,
+            correlation_id,
+            causation_id: None,
         }
     }
 }
 
 impl Display for CancelAllOrders {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let order_side = self
+            .order_side
+            .as_ref()
+            .map_or("NO_ORDER_SIDE", AsRef::as_ref);
         write!(
             f,
             "CancelAllOrders(instrument_id={}, order_side={})",
-            self.instrument_id, self.order_side,
+            self.instrument_id, order_side,
         )
     }
 }
@@ -134,12 +143,17 @@ pub struct BatchCancelOrders {
     pub cancels: Vec<CancelOrder>,
     pub command_id: UUID4,
     pub ts_init: UnixNanos,
-    pub params: Option<IndexMap<String, String>>,
+    pub params: Option<Params>,
+    #[builder(default)]
+    pub correlation_id: Option<UUID4>,
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub causation_id: Option<UUID4>,
 }
 
 impl BatchCancelOrders {
     /// Creates a new [`BatchCancelOrders`] instance.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
         trader_id: TraderId,
@@ -149,7 +163,8 @@ impl BatchCancelOrders {
         cancels: Vec<CancelOrder>,
         command_id: UUID4,
         ts_init: UnixNanos,
-        params: Option<IndexMap<String, String>>,
+        params: Option<Params>,
+        correlation_id: Option<UUID4>,
     ) -> Self {
         Self {
             trader_id,
@@ -160,6 +175,8 @@ impl BatchCancelOrders {
             command_id,
             ts_init,
             params,
+            correlation_id,
+            causation_id: None,
         }
     }
 }
@@ -168,11 +185,73 @@ impl Display for BatchCancelOrders {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "BatchCancelOrders(instrument_id={}, cancels=TBD)",
+            "BatchCancelOrders(instrument_id={}, cancels={})",
             self.instrument_id,
+            self.cancels.len(),
         )
     }
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    #[case(Some(OrderSide::Buy), "BUY")]
+    #[case(None, "NO_ORDER_SIDE")]
+    fn test_cancel_all_orders_display(
+        #[case] order_side: Option<OrderSide>,
+        #[case] expected_order_side: &str,
+    ) {
+        let command = CancelAllOrders::new(
+            TraderId::from("TRADER-001"),
+            None,
+            StrategyId::from("S-001"),
+            InstrumentId::from("AUD/USD.SIM"),
+            order_side,
+            UUID4::new(),
+            UnixNanos::default(),
+            None,
+            None,
+        );
+
+        assert_eq!(
+            command.to_string(),
+            format!("CancelAllOrders(instrument_id=AUD/USD.SIM, order_side={expected_order_side})")
+        );
+    }
+
+    #[rstest]
+    fn test_batch_cancel_orders_display() {
+        let cancel = CancelOrder::new(
+            TraderId::from("TRADER-001"),
+            None,
+            StrategyId::from("S-001"),
+            InstrumentId::from("AUD/USD.SIM"),
+            ClientOrderId::from("O-001"),
+            None,
+            UUID4::new(),
+            UnixNanos::default(),
+            None,
+            None,
+        );
+        let command = BatchCancelOrders::new(
+            TraderId::from("TRADER-001"),
+            None,
+            StrategyId::from("S-001"),
+            InstrumentId::from("AUD/USD.SIM"),
+            vec![cancel.clone(), cancel],
+            UUID4::new(),
+            UnixNanos::default(),
+            None,
+            None,
+        );
+
+        assert_eq!(
+            command.to_string(),
+            "BatchCancelOrders(instrument_id=AUD/USD.SIM, cancels=2)"
+        );
+    }
+}

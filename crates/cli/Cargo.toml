@@ -1,0 +1,53 @@
+[package]
+name = "nice-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Command-line interface for the nice trading engine"
+categories.workspace = true
+keywords.workspace = true
+documentation.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+defi = ["dep:nice-blockchain", "nice-model/defi"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+nice-common = { workspace = true }
+nice-core = { workspace = true }
+nice-infrastructure = { workspace = true, features = ["postgres"] }
+nice-model = { workspace = true }
+
+nice-blockchain = { workspace = true, features = [
+  "hypersync",
+], optional = true }
+
+anyhow = { workspace = true }
+clap = { workspace = true }
+dotenvy = { workspace = true }
+log = { workspace = true }
+mimalloc = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+ustr = { workspace = true }
+
+[dev-dependencies]
+rstest = { workspace = true }
+
+[[bin]]
+name = "nice"
+path = "src/bin/cli.rs"
+doc = false
+test = false

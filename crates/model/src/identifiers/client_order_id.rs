@@ -1,27 +1,20 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2025  Dyntrait  All rights reserved.
-//  All Rights Reserved
-//
-//  @File         : client_order_id.rs
-//  @Author       : dyntrait
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
 
-//! Represents a valid client order ID (assigned by the Nautilus system).
+
+//! Represents a valid client order ID (assigned by the nice system).
 
 use std::{
-    fmt::{Debug, Display, Formatter},
+    fmt::{Debug, Display},
     hash::Hash,
 };
 
-use nice_core::correctness::{FAILED, check_valid_string_ascii};
+use nice_core::correctness::{
+    CorrectnessResult, CorrectnessResultExt, FAILED, check_valid_string_ascii,
+};
 use ustr::Ustr;
 
-/// Represents a valid client order ID (assigned by the Nautilus system).
+const EXTERNAL_CLIENT_ORDER_ID: &str = "EXTERNAL";
+
+/// Represents a valid client order ID (assigned by the nice system).
 #[repr(C)]
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ClientOrderId(Ustr);
@@ -36,7 +29,7 @@ impl ClientOrderId {
     /// # Notes
     ///
     /// PyO3 requires a `Result` type for proper error handling and stacktrace printing in Python.
-    pub fn new_checked<T: AsRef<str>>(value: T) -> anyhow::Result<Self> {
+    pub fn new_checked<T: AsRef<str>>(value: T) -> CorrectnessResult<Self> {
         let value = value.as_ref();
         check_valid_string_ascii(value, stringify!(value))?;
         Ok(Self(Ustr::from(value)))
@@ -48,11 +41,12 @@ impl ClientOrderId {
     ///
     /// Panics if `value` is not a valid string.
     pub fn new<T: AsRef<str>>(value: T) -> Self {
-        Self::new_checked(value).expect(FAILED)
+        Self::new_checked(value).expect_display(FAILED)
     }
 
     /// Sets the inner identifier value.
-    pub fn set_inner(&mut self, value: &str) {
+    #[cfg_attr(not(feature = "python"), allow(dead_code))]
+    pub(crate) fn set_inner(&mut self, value: &str) {
         self.0 = Ustr::from(value);
     }
 
@@ -67,40 +61,46 @@ impl ClientOrderId {
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
+
+    /// Creates an external client order ID used when no ID was provided.
+    #[must_use]
+    pub fn external() -> Self {
+        Self::new(EXTERNAL_CLIENT_ORDER_ID)
+    }
+
+    /// Returns whether this client order ID is external.
+    #[must_use]
+    pub fn is_external(&self) -> bool {
+        self.0 == EXTERNAL_CLIENT_ORDER_ID
+    }
 }
 
 impl Debug for ClientOrderId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.0)
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "\"{}\"", self.0)
     }
 }
 
 impl Display for ClientOrderId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
 #[must_use]
-pub fn optional_ustr_to_vec_client_order_ids(s: Option<Ustr>) -> Option<Vec<ClientOrderId>> {
-    s.map(|ustr| {
-        let s_str = ustr.to_string();
-        s_str
-            .split(',')
-            .map(ClientOrderId::new)
-            .collect::<Vec<ClientOrderId>>()
-    })
+pub fn optional_ustr_to_vec_client_order_ids(value: Option<Ustr>) -> Option<Vec<ClientOrderId>> {
+    value.map(|ids| ids.split(',').map(ClientOrderId::new).collect())
 }
 
 #[must_use]
-pub fn optional_vec_client_order_ids_to_ustr(vec: Option<Vec<ClientOrderId>>) -> Option<Ustr> {
-    vec.map(|client_order_ids| {
-        let s: String = client_order_ids
-            .into_iter()
-            .map(|id| id.to_string())
-            .collect::<Vec<String>>()
+pub fn optional_vec_client_order_ids_to_ustr(value: Option<Vec<ClientOrderId>>) -> Option<Ustr> {
+    value.map(|ids| {
+        let value = ids
+            .iter()
+            .map(ClientOrderId::as_str)
+            .collect::<Vec<_>>()
             .join(",");
-        Ustr::from(&s)
+        Ustr::from(&value)
     })
 }
 
@@ -124,30 +124,44 @@ mod tests {
     }
 
     #[rstest]
-    fn test_optional_ustr_to_vec_client_order_ids() {
-        // Test with None
-        assert_eq!(optional_ustr_to_vec_client_order_ids(None), None);
+    fn test_external() {
+        let external = ClientOrderId::external();
+        let local = ClientOrderId::new("LOCAL-1");
 
-        // Test with Some
-        let ustr = Ustr::from("id1,id2,id3");
-        let client_order_ids = optional_ustr_to_vec_client_order_ids(Some(ustr)).unwrap();
-        assert_eq!(client_order_ids[0].as_str(), "id1");
-        assert_eq!(client_order_ids[1].as_str(), "id2");
-        assert_eq!(client_order_ids[2].as_str(), "id3");
+        assert_eq!(external.as_str(), "EXTERNAL");
+        assert!(external.is_external());
+        assert!(!local.is_external());
+    }
+
+    #[rstest]
+    #[should_panic(expected = "Condition failed: invalid string for 'value', was empty")]
+    fn test_new_with_empty_string_panics_with_display_format() {
+        let _ = ClientOrderId::new("");
+    }
+
+    #[rstest]
+    fn test_optional_ustr_to_vec_client_order_ids() {
+        assert_eq!(optional_ustr_to_vec_client_order_ids(None), None);
+        assert_eq!(
+            optional_ustr_to_vec_client_order_ids(Some(Ustr::from("id1,id2,id3"))),
+            Some(vec![
+                ClientOrderId::new("id1"),
+                ClientOrderId::new("id2"),
+                ClientOrderId::new("id3"),
+            ])
+        );
     }
 
     #[rstest]
     fn test_optional_vec_client_order_ids_to_ustr() {
-        // Test with None
         assert_eq!(optional_vec_client_order_ids_to_ustr(None), None);
-
-        // Test with Some
-        let client_order_ids = vec![
-            ClientOrderId::from("id1"),
-            ClientOrderId::from("id2"),
-            ClientOrderId::from("id3"),
-        ];
-        let ustr = optional_vec_client_order_ids_to_ustr(Some(client_order_ids)).unwrap();
-        assert_eq!(ustr.to_string(), "id1,id2,id3");
+        assert_eq!(
+            optional_vec_client_order_ids_to_ustr(Some(vec![
+                ClientOrderId::new("id1"),
+                ClientOrderId::new("id2"),
+                ClientOrderId::new("id3"),
+            ])),
+            Some(Ustr::from("id1,id2,id3"))
+        );
     }
 }

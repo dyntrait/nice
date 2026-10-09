@@ -1,22 +1,28 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : money.rs
-//  @Author       : dyntrait Created On 2026/1/5 14:46
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 //! DeFi-specific extensions for the [`Money`] type.
 
 use alloy_primitives::U256;
+use nice_core::correctness::{CorrectnessError, CorrectnessResult};
 
-use crate::types::{Currency, Money};
+use crate::types::{Currency, Money, Quantity};
 
 impl Money {
+    /// Creates a new [`Money`] instance from an unsigned integer amount at the currency precision.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the precision is invalid or the scaled amount exceeds the signed money
+    /// range.
+    pub fn from_u256(amount: U256, currency: Currency) -> CorrectnessResult<Self> {
+        let quantity = Quantity::from_u256(amount, currency.precision)?;
+        let raw =
+            i128::try_from(quantity.raw).map_err(|_| CorrectnessError::PredicateViolation {
+                message: format!("Amount for {currency} exceeds Money raw range"),
+            })?;
+        Self::from_raw_checked(raw, currency)
+    }
+
     /// Creates a new [`Money`] instance from raw wei value with 18-decimal precision.
     ///
     /// This method is specifically designed for DeFi applications where values are
@@ -24,11 +30,19 @@ impl Money {
     ///
     /// # Panics
     ///
-    /// Panics if the raw wei value exceeds 128-bit range.
+    /// Panics if `currency.precision` is not 18, or if the raw wei value exceeds the
+    /// signed 128-bit range.
     pub fn from_wei<U>(raw_wei: U, currency: Currency) -> Self
     where
         U: Into<U256>,
     {
+        assert!(
+            currency.precision == 18,
+            "`from_wei` requires a currency with precision 18, was {} for {}",
+            currency.precision,
+            currency.code,
+        );
+
         let raw_u256: U256 = raw_wei.into();
         let raw_u128: u128 = raw_u256
             .try_into()
@@ -45,12 +59,18 @@ impl Money {
 
     /// Converts this [`Money`] instance to raw wei value.
     ///
-    /// Only valid for prices with precision 18. For other precisions convert to precision 18 first.
+    /// # Panics
     ///
-    /// # Returns
-    ///
-    /// The raw wei value as a U256.
+    /// Panics if `self.currency.precision` is not 18 or `self.raw` is negative.
+    /// For other precisions convert to precision 18 first.
+    #[must_use]
     pub fn to_wei(&self) -> U256 {
+        assert!(
+            self.currency.precision == 18,
+            "Failed to convert money with precision {} to wei (requires precision 18)",
+            self.currency.precision,
+        );
+        assert!(self.raw >= 0, "Failed to convert negative money to wei");
         U256::from(self.raw as u128)
     }
 }
@@ -74,6 +94,17 @@ mod tests {
         // Use decimal comparison for high precision values
         assert_eq!(money.as_decimal(), dec!(1));
         assert_eq!(money.currency.precision, 18);
+    }
+
+    #[rstest]
+    fn test_from_u256_scales_six_decimal_currency_exactly() {
+        let usdc = Currency::new("USDC", 6, 0, "USD Coin", CurrencyType::Crypto);
+
+        let money = Money::from_u256(U256::from(987_654_321_u64), usdc).unwrap();
+
+        assert_eq!(money.raw, 9_876_543_210_000_000_000);
+        assert_eq!(money.as_decimal(), dec!(987.654321));
+        assert_eq!(money.currency, usdc);
     }
 
     #[rstest]
@@ -112,6 +143,38 @@ mod tests {
         let roundtrip_wei = money.to_wei();
 
         assert_eq!(original_wei, roundtrip_wei);
+    }
+
+    #[rstest]
+    fn test_checked_arith_rejects_mixed_scale_same_code() {
+        // Currency equality compares code only, so an 18-decimal ETH and the standard
+        // 8-decimal ETH compare equal. Their raw values are at different scales, so
+        // checked_add / checked_sub must detect the mismatch and return None.
+        let eth_standard = Currency::ETH(); // precision 8
+        let eth_wei = Currency::new("ETH", 18, 0, "Ethereum", CurrencyType::Crypto);
+
+        let standard = Money::new(1.0, eth_standard);
+        let wei = Money::from_wei(U256::from(1_000_000_000_000_000_000_u128), eth_wei);
+
+        assert_eq!(wei.checked_add(standard), None);
+        assert_eq!(standard.checked_add(wei), None);
+        assert_eq!(wei.checked_sub(standard), None);
+        assert_eq!(standard.checked_sub(wei), None);
+    }
+
+    #[rstest]
+    #[should_panic(expected = "`from_wei` requires a currency with precision 18")]
+    fn test_from_wei_rejects_non_18_precision() {
+        let eth_8 = Currency::ETH(); // precision 8
+        let _ = Money::from_wei(U256::from(1_000_000_000_000_000_000_u128), eth_8);
+    }
+
+    #[rstest]
+    #[should_panic(expected = "requires precision 18")]
+    fn test_to_wei_rejects_non_18_precision() {
+        let usd = Currency::new("USD", 2, 840, "United States dollar", CurrencyType::Fiat);
+        let m = Money::new(1.0, usd);
+        let _ = m.to_wei();
     }
 
     #[rstest]

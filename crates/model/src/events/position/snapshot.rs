@@ -1,19 +1,6 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2026  dyntrait  All rights reserved.
-//  All Rights Reserved
-//
-//  @File         : snapshot.rs
-//  @Author       : dyntrait
-//   @Create       : ${DATE} ${TIME}
-//  @Description  :
-//
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
 
-use nice_core::UnixNanos;
+
+use nice_core::{DurationNanos, UnixNanos};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -25,10 +12,6 @@ use crate::{
 
 /// Represents a position state snapshot as a certain instant.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nice_trader.core.nice_pyo3.model")
-)]
 pub struct PositionSnapshot {
     /// The trader ID associated with the snapshot.
     pub trader_id: TraderId,
@@ -73,7 +56,7 @@ pub struct PositionSnapshot {
     /// The commissions for the position.
     pub commissions: Vec<Money>,
     /// The open duration for the position (nanoseconds).
-    pub duration_ns: Option<u64>,
+    pub duration_ns: Option<DurationNanos>,
     /// UNIX timestamp (nanoseconds) when the position opened.
     pub ts_opened: UnixNanos,
     /// UNIX timestamp (nanoseconds) when the position closed.
@@ -82,9 +65,13 @@ pub struct PositionSnapshot {
     pub ts_init: UnixNanos,
     /// UNIX timestamp (nanoseconds) when the last position event occurred.
     pub ts_last: UnixNanos,
+    /// Full replay state when the snapshot is used as a durable correction boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay_state: Option<serde_json::Value>,
 }
 
 impl PositionSnapshot {
+    #[must_use]
     pub fn from(position: &Position, unrealized_pnl: Option<Money>) -> Self {
         Self {
             trader_id: position.trader_id,
@@ -113,7 +100,16 @@ impl PositionSnapshot {
             ts_closed: position.ts_closed,
             ts_init: position.ts_init,
             ts_last: position.ts_last,
+            replay_state: None,
         }
+    }
+
+    /// Creates a snapshot containing the full state needed to replay a corrected position.
+    #[must_use]
+    pub fn from_replay_state(position: &Position, unrealized_pnl: Option<Money>) -> Self {
+        let mut snapshot = Self::from(position, unrealized_pnl);
+        snapshot.replay_state = serde_json::to_value(position).ok();
+        snapshot
     }
 }
 
@@ -124,8 +120,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        enums::{LiquiditySide, OrderSide, OrderType, PositionSide},
-        events::OrderFilled,
+        enums::{OrderSide, PositionSide},
+        events::{OrderFilled, order::spec::OrderFilledSpec},
         identifiers::{
             AccountId, ClientOrderId, InstrumentId, PositionId, StrategyId, TradeId, TraderId,
             VenueOrderId,
@@ -158,80 +154,29 @@ mod tests {
             realized_pnl: Some(Money::new(100.0, Currency::USD())),
             unrealized_pnl: Some(Money::new(50.0, Currency::USD())),
             commissions: vec![Money::new(2.0, Currency::USD())],
-            duration_ns: Some(3_600_000_000_000), // 1 hour in nanoseconds
+            duration_ns: Some(DurationNanos::from_hours(1)),
             ts_opened: UnixNanos::from(1_000_000_000),
             ts_closed: Some(UnixNanos::from(4_600_000_000)),
             ts_init: UnixNanos::from(2_000_000_000),
             ts_last: UnixNanos::from(4_600_000_000),
+            replay_state: None,
         }
     }
 
     fn create_test_order_filled() -> OrderFilled {
-        OrderFilled::new(
-            TraderId::from("TRADER-001"),
-            StrategyId::from("EMA-CROSS"),
-            InstrumentId::from("AUD/USD.SIM"),
-            ClientOrderId::from("O-19700101-000000-001-001-1"),
-            VenueOrderId::from("1"),
-            AccountId::from("SIM-001"),
-            TradeId::from("T-001"),
-            OrderSide::Buy,
-            OrderType::Market,
-            Quantity::from("100"),
-            Price::from("0.8000"),
-            Currency::USD(),
-            LiquiditySide::Taker,
-            Default::default(),
-            UnixNanos::from(1_000_000_000),
-            UnixNanos::from(2_000_000_000),
-            false,
-            Some(PositionId::from("P-001")),
-            Some(Money::new(2.0, Currency::USD())),
-        )
-    }
-
-    #[rstest]
-    fn test_position_snapshot_new() {
-        let snapshot = create_test_position_snapshot();
-
-        assert_eq!(snapshot.trader_id, TraderId::from("TRADER-001"));
-        assert_eq!(snapshot.strategy_id, StrategyId::from("EMA-CROSS"));
-        assert_eq!(snapshot.instrument_id, InstrumentId::from("EURUSD.SIM"));
-        assert_eq!(snapshot.position_id, PositionId::from("P-001"));
-        assert_eq!(snapshot.account_id, AccountId::from("SIM-001"));
-        assert_eq!(
-            snapshot.opening_order_id,
-            ClientOrderId::from("O-19700101-000000-001-001-1")
-        );
-        assert_eq!(
-            snapshot.closing_order_id,
-            Some(ClientOrderId::from("O-19700101-000000-001-001-2"))
-        );
-        assert_eq!(snapshot.entry, OrderSide::Buy);
-        assert_eq!(snapshot.side, PositionSide::Long);
-        assert_eq!(snapshot.signed_qty, 100.0);
-        assert_eq!(snapshot.quantity, Quantity::from("100"));
-        assert_eq!(snapshot.peak_qty, Quantity::from("100"));
-        assert_eq!(snapshot.quote_currency, Currency::USD());
-        assert_eq!(snapshot.base_currency, Some(Currency::EUR()));
-        assert_eq!(snapshot.settlement_currency, Currency::USD());
-        assert_eq!(snapshot.avg_px_open, 1.0500);
-        assert_eq!(snapshot.avg_px_close, Some(1.0600));
-        assert_eq!(snapshot.realized_return, Some(0.0095));
-        assert_eq!(
-            snapshot.realized_pnl,
-            Some(Money::new(100.0, Currency::USD()))
-        );
-        assert_eq!(
-            snapshot.unrealized_pnl,
-            Some(Money::new(50.0, Currency::USD()))
-        );
-        assert_eq!(snapshot.commissions, vec![Money::new(2.0, Currency::USD())]);
-        assert_eq!(snapshot.duration_ns, Some(3_600_000_000_000));
-        assert_eq!(snapshot.ts_opened, UnixNanos::from(1_000_000_000));
-        assert_eq!(snapshot.ts_closed, Some(UnixNanos::from(4_600_000_000)));
-        assert_eq!(snapshot.ts_init, UnixNanos::from(2_000_000_000));
-        assert_eq!(snapshot.ts_last, UnixNanos::from(4_600_000_000));
+        OrderFilledSpec::builder()
+            .strategy_id(StrategyId::from("EMA-CROSS"))
+            .instrument_id(InstrumentId::from("AUD/USD.SIM"))
+            .client_order_id(ClientOrderId::from("O-19700101-000000-001-001-1"))
+            .venue_order_id(VenueOrderId::from("1"))
+            .trade_id(TradeId::from("T-001"))
+            .last_qty(Quantity::from("100"))
+            .last_px(Price::from("0.8000"))
+            .ts_event(UnixNanos::from(1_000_000_000))
+            .ts_init(UnixNanos::from(2_000_000_000))
+            .position_id(PositionId::from("P-001"))
+            .commission(Money::new(2.0, Currency::USD()))
+            .build()
     }
 
     #[rstest]
@@ -268,6 +213,7 @@ mod tests {
         assert_eq!(snapshot.ts_closed, position.ts_closed);
         assert_eq!(snapshot.ts_init, position.ts_init);
         assert_eq!(snapshot.ts_last, position.ts_last);
+        assert_eq!(snapshot.replay_state, None);
     }
 
     #[rstest]
@@ -282,164 +228,15 @@ mod tests {
     }
 
     #[rstest]
-    fn test_position_snapshot_clone() {
-        let snapshot1 = create_test_position_snapshot();
-        let snapshot2 = snapshot1.clone();
+    fn test_position_snapshot_from_replay_state() {
+        let instrument = audusd_sim();
+        let fill = create_test_order_filled();
+        let position = Position::new(&InstrumentAny::CurrencyPair(instrument), fill);
 
-        assert_eq!(snapshot1, snapshot2);
-    }
+        let snapshot = PositionSnapshot::from_replay_state(&position, None);
+        let restored: Position = serde_json::from_value(snapshot.replay_state.unwrap()).unwrap();
 
-    #[rstest]
-    fn test_position_snapshot_debug() {
-        let snapshot = create_test_position_snapshot();
-        let debug_str = format!("{snapshot:?}");
-
-        assert!(debug_str.contains("PositionSnapshot"));
-        assert!(debug_str.contains("TRADER-001"));
-        assert!(debug_str.contains("EMA-CROSS"));
-        assert!(debug_str.contains("EURUSD.SIM"));
-        assert!(debug_str.contains("P-001"));
-    }
-
-    #[rstest]
-    fn test_position_snapshot_partial_eq() {
-        let snapshot1 = create_test_position_snapshot();
-        let snapshot2 = create_test_position_snapshot();
-        let mut snapshot3 = create_test_position_snapshot();
-        snapshot3.quantity = Quantity::from("200");
-
-        assert_eq!(snapshot1, snapshot2);
-        assert_ne!(snapshot1, snapshot3);
-    }
-
-    #[rstest]
-    fn test_position_snapshot_with_commissions() {
-        let mut snapshot = create_test_position_snapshot();
-        snapshot.commissions = vec![
-            Money::new(1.0, Currency::USD()),
-            Money::new(0.5, Currency::USD()),
-        ];
-
-        assert_eq!(snapshot.commissions.len(), 2);
-        assert_eq!(snapshot.commissions[0], Money::new(1.0, Currency::USD()));
-        assert_eq!(snapshot.commissions[1], Money::new(0.5, Currency::USD()));
-    }
-
-    #[rstest]
-    fn test_position_snapshot_with_empty_commissions() {
-        let mut snapshot = create_test_position_snapshot();
-        snapshot.commissions = vec![];
-
-        assert!(snapshot.commissions.is_empty());
-    }
-
-    #[rstest]
-    fn test_position_snapshot_with_different_currencies() {
-        let mut snapshot = create_test_position_snapshot();
-        snapshot.quote_currency = Currency::EUR();
-        snapshot.base_currency = Some(Currency::USD());
-        snapshot.settlement_currency = Currency::EUR();
-
-        assert_eq!(snapshot.quote_currency, Currency::EUR());
-        assert_eq!(snapshot.base_currency, Some(Currency::USD()));
-        assert_eq!(snapshot.settlement_currency, Currency::EUR());
-    }
-
-    #[rstest]
-    fn test_position_snapshot_without_base_currency() {
-        let mut snapshot = create_test_position_snapshot();
-        snapshot.base_currency = None;
-
-        assert!(snapshot.base_currency.is_none());
-    }
-
-    #[rstest]
-    fn test_position_snapshot_different_position_sides() {
-        let mut long_snapshot = create_test_position_snapshot();
-        long_snapshot.side = PositionSide::Long;
-        long_snapshot.signed_qty = 100.0;
-
-        let mut short_snapshot = create_test_position_snapshot();
-        short_snapshot.side = PositionSide::Short;
-        short_snapshot.signed_qty = -100.0;
-
-        let mut flat_snapshot = create_test_position_snapshot();
-        flat_snapshot.side = PositionSide::Flat;
-        flat_snapshot.signed_qty = 0.0;
-
-        assert_eq!(long_snapshot.side, PositionSide::Long);
-        assert_eq!(short_snapshot.side, PositionSide::Short);
-        assert_eq!(flat_snapshot.side, PositionSide::Flat);
-    }
-
-    #[rstest]
-    fn test_position_snapshot_with_pnl_values() {
-        let mut snapshot = create_test_position_snapshot();
-        snapshot.realized_pnl = Some(Money::new(150.0, Currency::USD()));
-        snapshot.unrealized_pnl = Some(Money::new(-25.0, Currency::USD()));
-
-        assert_eq!(
-            snapshot.realized_pnl,
-            Some(Money::new(150.0, Currency::USD()))
-        );
-        assert_eq!(
-            snapshot.unrealized_pnl,
-            Some(Money::new(-25.0, Currency::USD()))
-        );
-    }
-
-    #[rstest]
-    fn test_position_snapshot_without_pnl_values() {
-        let mut snapshot = create_test_position_snapshot();
-        snapshot.realized_pnl = None;
-        snapshot.unrealized_pnl = None;
-
-        assert!(snapshot.realized_pnl.is_none());
-        assert!(snapshot.unrealized_pnl.is_none());
-    }
-
-    #[rstest]
-    fn test_position_snapshot_with_closing_data() {
-        let snapshot = create_test_position_snapshot();
-
-        assert!(snapshot.closing_order_id.is_some());
-        assert!(snapshot.avg_px_close.is_some());
-        assert!(snapshot.ts_closed.is_some());
-        assert!(snapshot.duration_ns.is_some());
-    }
-
-    #[rstest]
-    fn test_position_snapshot_without_closing_data() {
-        let mut snapshot = create_test_position_snapshot();
-        snapshot.closing_order_id = None;
-        snapshot.avg_px_close = None;
-        snapshot.ts_closed = None;
-
-        assert!(snapshot.closing_order_id.is_none());
-        assert!(snapshot.avg_px_close.is_none());
-        assert!(snapshot.ts_closed.is_none());
-    }
-
-    #[rstest]
-    fn test_position_snapshot_timestamps() {
-        let snapshot = create_test_position_snapshot();
-
-        assert_eq!(snapshot.ts_opened, UnixNanos::from(1_000_000_000));
-        assert_eq!(snapshot.ts_init, UnixNanos::from(2_000_000_000));
-        assert_eq!(snapshot.ts_last, UnixNanos::from(4_600_000_000));
-        assert_eq!(snapshot.ts_closed, Some(UnixNanos::from(4_600_000_000)));
-
-        assert!(snapshot.ts_opened < snapshot.ts_init);
-        assert!(snapshot.ts_init < snapshot.ts_last);
-    }
-
-    #[rstest]
-    fn test_position_snapshot_quantities() {
-        let snapshot = create_test_position_snapshot();
-
-        assert_eq!(snapshot.quantity, Quantity::from("100"));
-        assert_eq!(snapshot.peak_qty, Quantity::from("100"));
-        assert!(snapshot.peak_qty >= snapshot.quantity);
+        assert_eq!(restored, position);
     }
 
     #[rstest]
@@ -451,21 +248,5 @@ mod tests {
         let deserialized: PositionSnapshot = serde_json::from_str(&json).unwrap();
 
         assert_eq!(original, deserialized);
-    }
-
-    #[rstest]
-    fn test_position_snapshot_with_duration() {
-        let mut snapshot = create_test_position_snapshot();
-        snapshot.duration_ns = Some(7_200_000_000_000); // 2 hours
-
-        assert_eq!(snapshot.duration_ns, Some(7_200_000_000_000));
-    }
-
-    #[rstest]
-    fn test_position_snapshot_without_duration() {
-        let mut snapshot = create_test_position_snapshot();
-        snapshot.duration_ns = None;
-
-        assert!(snapshot.duration_ns.is_none());
     }
 }

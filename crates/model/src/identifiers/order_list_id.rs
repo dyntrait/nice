@@ -1,27 +1,18 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2025  dyntrait  All rights reserved.
-//  All Rights Reserved
-//
-//  @File         : order_list_id.rs
-//  @Author       : dyntrait
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
 
-//! Represents a valid order list ID (assigned by the Nautilus system).
+
+//! Represents a valid order list ID (assigned by the nice system).
 
 use std::{
-    fmt::{Debug, Display, Formatter},
+    fmt::{Debug, Display},
     hash::Hash,
 };
 
-use nice_core::correctness::{FAILED, check_valid_string_ascii};
+use nice_core::correctness::{
+    CorrectnessResult, CorrectnessResultExt, FAILED, check_valid_string_ascii,
+};
 use ustr::Ustr;
 
-/// Represents a valid order list ID (assigned by the Nautilus system).
+/// Represents a valid order list ID (assigned by the nice system).
 #[repr(C)]
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OrderListId(Ustr);
@@ -36,7 +27,7 @@ impl OrderListId {
     /// # Notes
     ///
     /// PyO3 requires a `Result` type for proper error handling and stacktrace printing in Python.
-    pub fn new_checked<T: AsRef<str>>(value: T) -> anyhow::Result<Self> {
+    pub fn new_checked<T: AsRef<str>>(value: T) -> CorrectnessResult<Self> {
         let value = value.as_ref();
         check_valid_string_ascii(value, stringify!(value))?;
         Ok(Self(Ustr::from(value)))
@@ -48,11 +39,12 @@ impl OrderListId {
     ///
     /// Panics if `value` is not a valid string.
     pub fn new<T: AsRef<str>>(value: T) -> Self {
-        Self::new_checked(value).expect(FAILED)
+        Self::new_checked(value).expect_display(FAILED)
     }
 
     /// Sets the inner identifier value.
-    pub fn set_inner(&mut self, value: &str) {
+    #[cfg_attr(not(feature = "python"), allow(dead_code))]
+    pub(crate) fn set_inner(&mut self, value: &str) {
         self.0 = Ustr::from(value);
     }
 
@@ -70,13 +62,13 @@ impl OrderListId {
 }
 
 impl Debug for OrderListId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.0)
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "\"{}\"", self.0)
     }
 }
 
 impl Display for OrderListId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
@@ -92,5 +84,11 @@ mod tests {
     fn test_string_reprs(order_list_id_test: OrderListId) {
         assert_eq!(order_list_id_test.as_str(), "001");
         assert_eq!(format!("{order_list_id_test}"), "001");
+    }
+
+    #[rstest]
+    #[should_panic(expected = "Condition failed: invalid string for 'value', was empty")]
+    fn test_new_with_empty_string_panics_with_display_format() {
+        let _ = OrderListId::new("");
     }
 }

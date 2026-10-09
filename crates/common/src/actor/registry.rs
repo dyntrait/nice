@@ -1,16 +1,5 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : registry.rs.rs
-//  @Author       : dyntrait Created On 2026/1/5 15:44
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
 
-//! Thread-local actor registry with lifetime-safe access guards.
+//! Thread-local actor registry with access guards.
 //!
 //! # Design
 //!
@@ -19,19 +8,35 @@
 //!
 //! - **Use-after-free prevention**: `ActorRef` holds an `Rc` clone, keeping the actor
 //!   alive even if removed from the registry while the guard exists.
-//! - **Re-entrant callbacks**: Message handlers frequently call back into the registry
-//!   to access other actors. Unlike `RefCell`-style borrow tracking, multiple `ActorRef`
-//!   guards can exist simultaneously without panicking.
-//! - **No `'static` lifetime lie**: Previous designs returned `&'static mut T`, which
-//!   didn't reflect actual validity. The guard-based approach ties the borrow to the
-//!   guard's lifetime.
+//! - **Scoped registry access**: Registry access stays tied to the thread-local storage
+//!   access callback.
+//! - **Thread-local only**: Guards must not be sent across threads.
 //!
 //! # Limitations
 //!
 //! - **Aliasing not prevented**: Two guards can exist for the same actor simultaneously,
-//!   allowing aliased mutable access. This is technically undefined behavior but is
-//!   required by the re-entrant callback pattern. Higher-level discipline is required.
-//! - **Thread-local only**: Guards must not be sent across threads.
+//!   allowing aliased mutable access. This is undefined behavior if both guards create
+//!   overlapping references to the same actor. The current actor dispatch model relies
+//!   on same-actor re-entrant lookups, so fixing this requires a broader dispatch and
+//!   ownership redesign.
+//!
+//! # Invariants
+//!
+//! These contracts must hold regardless of how the registry is implemented
+//! internally. The first three are verified by tests in this module. The
+//! fourth is a usage discipline enforced by convention.
+//!
+//! - **Thread isolation**: Each thread has its own registry instance. An actor
+//!   registered on one thread is never visible from another.
+//! - **Guard survival**: An [`ActorRef`] keeps its actor alive via reference
+//!   counting. Removing or replacing an actor in the registry does not invalidate
+//!   existing guards.
+//! - **Type safety**: [`get_actor_unchecked`] and [`try_get_actor_unchecked`]
+//!   verify the concrete type at runtime before casting. A type mismatch panics
+//!   or returns `None`, respectively.
+//! - **Short-lived guards**: Guards must be obtained, used, and dropped within a
+//!   single synchronous scope. Never store an [`ActorRef`] in a struct or hold
+//!   one across an `.await` point.
 
 use std::{
     any::TypeId,
@@ -49,16 +54,7 @@ use super::Actor;
 
 /// A guard providing mutable access to an actor.
 ///
-/// This guard holds an `Rc` reference to keep the actor alive, preventing
-/// use-after-free if the actor is removed from the registry while the guard
-/// exists. The guard implements `Deref` and `DerefMut` for ergonomic access.
-///
-/// # Safety
-///
-/// While this guard prevents use-after-free from registry removal, it does not
-/// prevent aliasing. Multiple `ActorRef` instances can exist for the same actor
-/// simultaneously, which is technically undefined behavior but is required by
-/// the re-entrant callback pattern in this codebase.
+/// This guard holds an `Rc` reference to keep the actor alive.
 pub struct ActorRef<T: Actor> {
     actor_rc: Rc<UnsafeCell<dyn Actor>>,
     _marker: PhantomData<T>,
@@ -76,15 +72,15 @@ impl<T: Actor> Deref for ActorRef<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        // SAFETY: Type was verified at construction time
+        // SAFETY: Type was verified at construction time.
         unsafe { &*(self.actor_rc.get() as *const T) }
     }
 }
 
 impl<T: Actor> DerefMut for ActorRef<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        // SAFETY: Type was verified at construction time
-        unsafe { &mut *(self.actor_rc.get() as *mut T) }
+        // SAFETY: Type was verified at construction time.
+        unsafe { &mut *self.actor_rc.get().cast::<T>() }
     }
 }
 
@@ -153,14 +149,8 @@ impl ActorRegistry {
     }
 }
 
-pub fn get_actor_registry() -> &'static ActorRegistry {
-    ACTOR_REGISTRY.with(|registry| unsafe {
-        // SAFETY: We return a static reference that lives for the lifetime of the thread.
-        // Since this is thread_local storage, each thread has its own instance.
-        // The transmute extends the lifetime to 'static which is safe because
-        // thread_local ensures the registry lives for the thread's entire lifetime.
-        std::mem::transmute::<&ActorRegistry, &'static ActorRegistry>(registry)
-    })
+pub fn with_actor_registry<R>(f: impl FnOnce(&ActorRegistry) -> R) -> R {
+    ACTOR_REGISTRY.with(f)
 }
 
 /// Registers an actor.
@@ -173,13 +163,21 @@ where
 
     // Register as Actor (message handling only)
     let actor_trait_ref: Rc<UnsafeCell<dyn Actor>> = actor_ref.clone();
-    get_actor_registry().insert(actor_id, actor_trait_ref);
+    with_actor_registry(|registry| registry.insert(actor_id, actor_trait_ref));
 
     actor_ref
 }
 
 pub fn get_actor(id: &Ustr) -> Option<Rc<UnsafeCell<dyn Actor>>> {
-    get_actor_registry().get(id)
+    with_actor_registry(|registry| registry.get(id))
+}
+
+/// Removes the actor with `id` from the registry.
+///
+/// Only the exact ID is removed, so unrelated actors sharing the thread-local registry are
+/// untouched.
+pub fn deregister_actor(id: &Ustr) {
+    with_actor_registry(|registry| registry.remove(id));
 }
 
 /// Returns a guard providing mutable access to the registered actor of type `T`.
@@ -191,61 +189,55 @@ pub fn get_actor(id: &Ustr) -> Option<Rc<UnsafeCell<dyn Actor>>> {
 ///
 /// - Panics if no actor with the specified `id` is found in the registry.
 /// - Panics if the stored actor is not of type `T`.
-///
-/// # Safety
-///
-/// While this function is not marked `unsafe`, aliasing constraints apply:
-///
-/// - **Aliasing**: The caller should ensure no other mutable references to the same
-///   actor exist simultaneously. The callback-based message handling pattern in this
-///   codebase requires re-entrant access, which technically violates this invariant.
-/// - **Thread safety**: The registry is thread-local; do not send guards across
-///   threads.
 #[must_use]
 pub fn get_actor_unchecked<T: Actor>(id: &Ustr) -> ActorRef<T> {
-    let registry = get_actor_registry();
-    let actor_rc = registry
-        .get(id)
+    let actor_rc = with_actor_registry(|registry| registry.get(id))
         .unwrap_or_else(|| panic!("Actor for {id} not found"));
 
-    // SAFETY: Get a reference to check the type before casting
-    let actor_ref = unsafe { &*actor_rc.get() };
-    let actual_type = actor_ref.as_any().type_id();
-    let expected_type = TypeId::of::<T>();
-
-    if actual_type != expected_type {
-        panic!("Actor type mismatch for '{id}': expected {expected_type:?}, found {actual_type:?}");
-    }
-
-    ActorRef {
-        actor_rc,
-        _marker: PhantomData,
+    match actor_ref_from_rc(actor_rc) {
+        Ok(actor_ref) => actor_ref,
+        Err(ActorRefError {
+            expected_type,
+            actual_type,
+        }) => {
+            panic!(
+                "Actor type mismatch for '{id}': expected {expected_type:?}, found {actual_type:?}"
+            )
+        }
     }
 }
 
 /// Attempts to get a guard providing mutable access to the registered actor.
 ///
 /// Returns `None` if the actor is not found or the type doesn't match.
-///
-/// # Safety
-///
-/// See [`get_actor_unchecked`] for safety requirements. The same aliasing
-/// and thread-safety constraints apply.
 #[must_use]
 pub fn try_get_actor_unchecked<T: Actor>(id: &Ustr) -> Option<ActorRef<T>> {
-    let registry = get_actor_registry();
-    let actor_rc = registry.get(id)?;
+    let actor_rc = with_actor_registry(|registry| registry.get(id))?;
+    actor_ref_from_rc(actor_rc).ok()
+}
 
-    // SAFETY: Get a reference to check the type before casting
+#[derive(Debug)]
+struct ActorRefError {
+    expected_type: TypeId,
+    actual_type: TypeId,
+}
+
+fn actor_ref_from_rc<T: Actor>(
+    actor_rc: Rc<UnsafeCell<dyn Actor>>,
+) -> Result<ActorRef<T>, ActorRefError> {
+    // SAFETY: Get a reference to check the type before casting.
     let actor_ref = unsafe { &*actor_rc.get() };
     let actual_type = actor_ref.as_any().type_id();
     let expected_type = TypeId::of::<T>();
 
     if actual_type != expected_type {
-        return None;
+        return Err(ActorRefError {
+            expected_type,
+            actual_type,
+        });
     }
 
-    Some(ActorRef {
+    Ok(ActorRef {
         actor_rc,
         _marker: PhantomData,
     })
@@ -253,19 +245,18 @@ pub fn try_get_actor_unchecked<T: Actor>(id: &Ustr) -> Option<ActorRef<T>> {
 
 /// Checks if an actor with the `id` exists in the registry.
 pub fn actor_exists(id: &Ustr) -> bool {
-    get_actor_registry().contains(id)
+    with_actor_registry(|registry| registry.contains(id))
 }
 
 /// Returns the number of registered actors.
 pub fn actor_count() -> usize {
-    get_actor_registry().len()
+    with_actor_registry(ActorRegistry::len)
 }
 
 #[cfg(test)]
 /// Clears the actor registry (for test isolation).
 pub fn clear_actor_registry() {
-    let registry = get_actor_registry();
-    registry.actors.borrow_mut().clear();
+    with_actor_registry(|registry| registry.actors.borrow_mut().clear());
 }
 
 #[cfg(test)]
@@ -314,6 +305,7 @@ mod tests {
 
         let mut actor_ref = get_actor_unchecked::<TestActor>(&id);
         actor_ref.value = 999;
+        drop(actor_ref);
 
         let actor_ref2 = get_actor_unchecked::<TestActor>(&id);
         assert_eq!(actor_ref2.value, 999);
@@ -330,8 +322,6 @@ mod tests {
 
     #[rstest]
     fn test_try_get_returns_none_for_wrong_type() {
-        clear_actor_registry();
-
         #[derive(Debug)]
         struct OtherActor {
             id: Ustr,
@@ -347,11 +337,132 @@ mod tests {
             }
         }
 
+        clear_actor_registry();
+
         let id = Ustr::from("other-actor");
         let actor = OtherActor { id };
         register_actor(actor);
 
         let result = try_get_actor_unchecked::<TestActor>(&id);
         assert!(result.is_none());
+    }
+
+    #[rstest]
+    fn test_registry_is_thread_local() {
+        clear_actor_registry();
+
+        let id = Ustr::from("thread-local-actor");
+        let actor = TestActor { id, value: 42 };
+        register_actor(actor);
+
+        assert!(actor_exists(&id));
+        assert_eq!(actor_count(), 1);
+
+        let visible_on_other_thread = std::thread::spawn(move || {
+            // Each thread gets its own empty registry
+            (actor_exists(&id), actor_count())
+        })
+        .join()
+        .unwrap();
+
+        assert!(!visible_on_other_thread.0);
+        assert_eq!(visible_on_other_thread.1, 0);
+    }
+
+    #[rstest]
+    fn test_actor_ref_survives_registry_removal() {
+        clear_actor_registry();
+
+        let id = Ustr::from("removable-actor");
+        let actor = TestActor { id, value: 7 };
+        register_actor(actor);
+        assert_eq!(actor_count(), 1);
+
+        let mut guard = get_actor_unchecked::<TestActor>(&id);
+
+        with_actor_registry(|registry| {
+            registry.remove(&id);
+        });
+        assert!(!actor_exists(&id));
+        assert_eq!(actor_count(), 0);
+
+        assert_eq!(guard.value, 7);
+        guard.value = 99;
+        assert_eq!(guard.value, 99);
+    }
+
+    #[rstest]
+    fn test_deregister_actor_removes_only_requested_actor_and_retains_guard() {
+        clear_actor_registry();
+
+        let removed_id = Ustr::from("removed-actor");
+        let retained_id = Ustr::from("retained-actor");
+        register_actor(TestActor {
+            id: removed_id,
+            value: 7,
+        });
+        register_actor(TestActor {
+            id: retained_id,
+            value: 11,
+        });
+        let removed_guard = get_actor_unchecked::<TestActor>(&removed_id);
+
+        deregister_actor(&removed_id);
+
+        assert!(!actor_exists(&removed_id));
+        assert!(actor_exists(&retained_id));
+        assert_eq!(actor_count(), 1);
+        assert_eq!(removed_guard.value, 7);
+        assert_eq!(get_actor_unchecked::<TestActor>(&retained_id).value, 11);
+    }
+
+    #[rstest]
+    fn test_actor_ref_survives_same_id_replacement() {
+        clear_actor_registry();
+
+        let id = Ustr::from("replaceable-actor");
+        let actor_a = TestActor { id, value: 1 };
+        register_actor(actor_a);
+
+        let guard_a = get_actor_unchecked::<TestActor>(&id);
+        assert_eq!(guard_a.value, 1);
+
+        let actor_b = TestActor { id, value: 2 };
+        register_actor(actor_b);
+
+        // Old guard still sees actor A
+        assert_eq!(guard_a.value, 1);
+
+        // Fresh lookup sees actor B
+        let guard_b = get_actor_unchecked::<TestActor>(&id);
+        assert_eq!(guard_b.value, 2);
+        assert_eq!(actor_count(), 1);
+    }
+
+    #[should_panic(expected = "Actor type mismatch")]
+    #[rstest]
+    fn test_get_actor_unchecked_panics_on_type_mismatch() {
+        #[derive(Debug)]
+        struct OtherActor {
+            id: Ustr,
+        }
+
+        impl Actor for OtherActor {
+            fn id(&self) -> Ustr {
+                self.id
+            }
+            fn handle(&mut self, _msg: &dyn Any) {}
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+        }
+
+        clear_actor_registry();
+
+        let id = Ustr::from("typed-actor");
+        let actor = OtherActor { id };
+        register_actor(actor);
+
+        let _guard = get_actor_unchecked::<TestActor>(&id);
     }
 }

@@ -1,14 +1,3 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : custom.rs
-//  @Author       : dyntrait Created On 2026/1/5 15:17
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
 
 //! A user custom data type.
 
@@ -22,7 +11,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "python",
-    pyo3::pyclass(module = "nice_trader.core.nice_pyo3.common")
+    pyo3::pyclass(module = "nice_trader.common", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nice_trader.common")
 )]
 pub struct CustomData {
     pub data_type: DataType,

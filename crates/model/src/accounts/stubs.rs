@@ -1,14 +1,4 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : stubs.rs
-//  @Author       : dyntrait Created On 2026/1/5 14:53
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 //! Lightweight stub implementations useful in unit tests where a full account object is
 //! unnecessary.
@@ -16,9 +6,16 @@
 use rstest::fixture;
 
 use crate::{
-    accounts::{Account, AccountAny, CashAccount, MarginAccount},
+    accounts::{Account, AccountAny, BettingAccount, CashAccount, MarginAccount, WalletAccount},
     enums::{AccountType, LiquiditySide},
-    events::account::{state::AccountState, stubs::*},
+    events::account::{
+        state::AccountState,
+        stubs::{
+            betting_account_state, cash_account_state, cash_account_state_million_usd,
+            cash_account_state_million_usdt, cash_account_state_multi, margin_account_state,
+            wallet_account_state,
+        },
+    },
     identifiers::stubs::{account_id, uuid4},
     instruments::InstrumentAny,
     types::{AccountBalance, Currency, Money, Price, Quantity},
@@ -65,6 +62,16 @@ pub fn cash_account(cash_account_state: AccountState) -> CashAccount {
 }
 
 #[fixture]
+pub fn betting_account(betting_account_state: AccountState) -> BettingAccount {
+    BettingAccount::new(betting_account_state, true)
+}
+
+#[fixture]
+pub fn wallet_account(wallet_account_state: AccountState) -> WalletAccount {
+    WalletAccount::new(wallet_account_state, true)
+}
+
+#[fixture]
 pub fn cash_account_million_usd(cash_account_state_million_usd: AccountState) -> CashAccount {
     CashAccount::new(cash_account_state_million_usd, true, false)
 }
@@ -86,14 +93,14 @@ pub fn cash_account_borrowing_million_usd(
     CashAccount::new(cash_account_state_million_usd, true, true)
 }
 
-/// Helper to calculate commission in test fixtures.
+/// Calculates commission in test fixtures.
 ///
 /// # Panics
 ///
 /// Panics if the underlying `calculate_commission` returns an error.
 #[must_use]
 pub fn calculate_commission(
-    instrument: InstrumentAny,
+    instrument: &InstrumentAny,
     quantity: Quantity,
     price: Price,
     currency: Option<Currency>,

@@ -1,14 +1,4 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : limit.rs
-//  @Author       : dyntrait Created On 2026/1/5 14:04
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 use std::{
     fmt::Display,
@@ -16,7 +6,10 @@ use std::{
 };
 
 use indexmap::IndexMap;
-use nice_core::{UUID4, UnixNanos, correctness::FAILED};
+use nice_core::{
+    UUID4, UnixNanos,
+    correctness::{CorrectnessError, FAILED},
+};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use ustr::Ustr;
@@ -37,10 +30,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nice_trader.core.nice_pyo3.model")
-)]
+
 pub struct LimitOrder {
     core: OrderCore,
     pub price: Price,
@@ -59,7 +49,8 @@ impl LimitOrder {
     /// - The `quantity` is not positive.
     /// - The `display_qty` (when provided) exceeds `quantity`.
     /// - The `time_in_force` is GTD and the `expire_time` is `None` or zero.
-    #[allow(clippy::too_many_arguments)]
+    /// - The order metadata violates an [`OrderInitialized::new_checked`] invariant.
+    #[expect(clippy::too_many_arguments)]
     pub fn new_checked(
         trader_id: TraderId,
         strategy_id: StrategyId,
@@ -86,12 +77,12 @@ impl LimitOrder {
         tags: Option<Vec<Ustr>>,
         init_id: UUID4,
         ts_init: UnixNanos,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, OrderError> {
         check_positive_quantity(quantity, stringify!(quantity))?;
         check_display_qty(display_qty, quantity)?;
         check_time_in_force(time_in_force, expire_time)?;
 
-        let init_order = OrderInitialized::new(
+        let init_order = OrderInitialized::new_checked(
             trader_id,
             strategy_id,
             instrument_id,
@@ -113,6 +104,7 @@ impl LimitOrder {
             None,
             None,
             None,
+            None,
             expire_time,
             display_qty,
             emulation_trigger,
@@ -125,7 +117,7 @@ impl LimitOrder {
             exec_algorithm_params,
             exec_spawn_id,
             tags,
-        );
+        )?;
 
         Ok(Self {
             core: OrderCore::new(init_order),
@@ -142,7 +134,8 @@ impl LimitOrder {
     /// # Panics
     ///
     /// Panics if any order validation fails (see [`LimitOrder::new_checked`]).
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         trader_id: TraderId,
         strategy_id: StrategyId,
@@ -197,7 +190,7 @@ impl LimitOrder {
             init_id,
             ts_init,
         )
-            .expect(FAILED)
+        .unwrap_or_else(|e| panic!("{FAILED}: {e}"))
     }
 }
 
@@ -382,6 +375,10 @@ impl Order for LimitOrder {
         self.filled_qty
     }
 
+    fn voided_qty(&self) -> Quantity {
+        self.voided_qty
+    }
+
     fn leaves_qty(&self) -> Quantity {
         self.leaves_qty
     }
@@ -390,11 +387,11 @@ impl Order for LimitOrder {
         self.overfill_qty
     }
 
-    fn avg_px(&self) -> Option<f64> {
+    fn avg_px(&self) -> Option<Decimal> {
         self.avg_px
     }
 
-    fn slippage(&self) -> Option<f64> {
+    fn slippage(&self) -> Option<Decimal> {
         self.slippage
     }
 
@@ -439,16 +436,20 @@ impl Order for LimitOrder {
     }
 
     fn apply(&mut self, event: OrderEventAny) -> Result<(), OrderError> {
+        let updates_slippage = matches!(
+            event,
+            OrderEventAny::Filled(_) | OrderEventAny::FillVoided(_),
+        );
+
+        self.core.apply(event.clone())?;
+
         if let OrderEventAny::Updated(ref event) = event {
             self.update(event);
-        };
-        let is_order_filled = matches!(event, OrderEventAny::Filled(_));
+        }
 
-        self.core.apply(event)?;
-
-        if is_order_filled {
+        if updates_slippage {
             self.core.set_slippage(self.price);
-        };
+        }
 
         Ok(())
     }
@@ -544,18 +545,23 @@ impl Display for LimitOrder {
     }
 }
 
-impl From<OrderInitialized> for LimitOrder {
-    fn from(event: OrderInitialized) -> Self {
-        Self::new(
+impl TryFrom<OrderInitialized> for LimitOrder {
+    type Error = OrderError;
+
+    fn try_from(event: OrderInitialized) -> Result<Self, Self::Error> {
+        let price = event
+            .price
+            .ok_or_else(|| CorrectnessError::PredicateViolation {
+                message: "`price` is required for `LimitOrder` initialization".to_string(),
+            })?;
+        Self::new_checked(
             event.trader_id,
             event.strategy_id,
             event.instrument_id,
             event.client_order_id,
             event.order_side,
             event.quantity,
-            event
-                .price // TODO: Improve this error, model order domain errors
-                .expect("Error initializing order: `price` was `None` for `LimitOrder"),
+            price,
             event.time_in_force,
             event.expire_time,
             event.post_only,
@@ -588,14 +594,14 @@ mod tests {
         events::{OrderEventAny, OrderUpdated},
         identifiers::InstrumentId,
         instruments::{CurrencyPair, stubs::*},
-        orders::{Order, OrderTestBuilder, stubs::TestOrderStubs},
+        orders::{Order, OrderError, OrderTestBuilder, stubs::TestOrderStubs},
         types::{Price, Quantity},
     };
 
     #[rstest]
-    fn test_initialize(_audusd_sim: CurrencyPair) {
+    fn test_initialize(audusd_sim: CurrencyPair) {
         let order = OrderTestBuilder::new(OrderType::Limit)
-            .instrument_id(_audusd_sim.id)
+            .instrument_id(audusd_sim.id)
             .side(OrderSide::Buy)
             .price(Price::from("0.68000"))
             .quantity(Quantity::from(1))
@@ -746,6 +752,36 @@ mod tests {
 
         assert_eq!(accepted_order.quantity(), updated_quantity);
         assert_eq!(accepted_order.price(), Some(updated_price));
+    }
+
+    #[rstest]
+    fn test_limit_order_rejects_invalid_update_atomically() {
+        let order = OrderTestBuilder::new(OrderType::Limit)
+            .instrument_id(InstrumentId::from("BTC-USDT.BINANCE"))
+            .quantity(Quantity::from(10))
+            .price(Price::new(100.0, 2))
+            .build();
+        let mut accepted_order = TestOrderStubs::make_accepted_order(&order);
+        let state = (
+            accepted_order.status(),
+            accepted_order.previous_status(),
+            accepted_order.ts_last(),
+            accepted_order.events().len(),
+        );
+        let event = OrderUpdated {
+            client_order_id: accepted_order.client_order_id(),
+            strategy_id: accepted_order.strategy_id(),
+            trigger_price: Some(Price::new(95.0, 2)),
+            ..Default::default()
+        };
+
+        let result = accepted_order.apply(OrderEventAny::Updated(event));
+
+        assert!(matches!(result, Err(OrderError::InvalidOrderEvent)));
+        assert_eq!(accepted_order.status(), state.0);
+        assert_eq!(accepted_order.previous_status(), state.1);
+        assert_eq!(accepted_order.ts_last(), state.2);
+        assert_eq!(accepted_order.events().len(), state.3);
     }
 
     #[rstest]

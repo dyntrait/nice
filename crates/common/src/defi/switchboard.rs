@@ -1,28 +1,17 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : switchboard.rs.rs
-//  @Author       : dyntrait Created On 2026/1/5 15:50
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
 
 //! DeFi-specific switchboard functionality.
 
 use ahash::AHashMap;
-use nautilus_model::{defi::Blockchain, identifiers::InstrumentId};
+use nice_model::{defi::Blockchain, identifiers::InstrumentId};
 
-use crate::msgbus::{
-    core::{MStr, Topic},
-    get_message_bus,
-    switchboard::MessagingSwitchboard,
-};
+use crate::msgbus::{MStr, MessagingSwitchboard, Topic, get_message_bus};
 
 /// DeFi-specific switchboard state.
 #[derive(Clone, Debug, Default)]
+#[allow(
+    clippy::struct_field_names,
+    reason = "topic suffix consistently identifies routing maps"
+)]
 pub(crate) struct DefiSwitchboard {
     pub(crate) block_topics: AHashMap<Blockchain, MStr<Topic>>,
     pub(crate) pool_topics: AHashMap<InstrumentId, MStr<Topic>>,

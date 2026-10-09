@@ -1,17 +1,4 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2026  dyntrait  All rights reserved.
-//  All Rights Reserved
-//
-//  @File         : depth.rs
-//  @Author       : dyntrait
-//   @Create       : ${DATE} ${TIME}
-//  @Description  :
-//
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 //! An `OrderBookDepth10` aggregated top-of-book data type with a fixed depth of 10 levels per side.
 
@@ -35,12 +22,10 @@ pub const DEPTH10_LEN: usize = 10;
 ///
 /// Note: This type is not compatible with `OrderBookDelta` or `OrderBookDeltas` due to
 /// its specialized structure and limited depth use case.
-#[repr(C)]
+///
+/// Per-level [`BookOrder::order_id`] values are non-semantic for this aggregated MBP data.
+/// Parquet catalog decoding canonicalizes them to zero.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nice_trader.core.nice_pyo3.model")
-)]
 pub struct OrderBookDepth10 {
     /// The instrument ID for the book.
     pub instrument_id: InstrumentId,
@@ -64,7 +49,7 @@ pub struct OrderBookDepth10 {
 
 impl OrderBookDepth10 {
     /// Creates a new [`OrderBookDepth10`] instance.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
         instrument_id: InstrumentId,
@@ -108,66 +93,19 @@ impl OrderBookDepth10 {
     #[must_use]
     pub fn get_fields() -> IndexMap<String, String> {
         let mut metadata = IndexMap::new();
-        metadata.insert("bid_price_0".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("bid_price_1".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("bid_price_2".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("bid_price_3".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("bid_price_4".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("bid_price_5".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("bid_price_6".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("bid_price_7".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("bid_price_8".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("bid_price_9".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("ask_price_0".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("ask_price_1".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("ask_price_2".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("ask_price_3".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("ask_price_4".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("ask_price_5".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("ask_price_6".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("ask_price_7".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("ask_price_8".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("ask_price_9".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("bid_size_0".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("bid_size_1".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("bid_size_2".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("bid_size_3".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("bid_size_4".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("bid_size_5".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("bid_size_6".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("bid_size_7".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("bid_size_8".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("bid_size_9".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("ask_size_0".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("ask_size_1".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("ask_size_2".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("ask_size_3".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("ask_size_4".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("ask_size_5".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("ask_size_6".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("ask_size_7".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("ask_size_8".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("ask_size_9".to_string(), FIXED_SIZE_BINARY.to_string());
-        metadata.insert("bid_count_0".to_string(), "UInt32".to_string());
-        metadata.insert("bid_count_1".to_string(), "UInt32".to_string());
-        metadata.insert("bid_count_2".to_string(), "UInt32".to_string());
-        metadata.insert("bid_count_3".to_string(), "UInt32".to_string());
-        metadata.insert("bid_count_4".to_string(), "UInt32".to_string());
-        metadata.insert("bid_count_5".to_string(), "UInt32".to_string());
-        metadata.insert("bid_count_6".to_string(), "UInt32".to_string());
-        metadata.insert("bid_count_7".to_string(), "UInt32".to_string());
-        metadata.insert("bid_count_8".to_string(), "UInt32".to_string());
-        metadata.insert("bid_count_9".to_string(), "UInt32".to_string());
-        metadata.insert("ask_count_0".to_string(), "UInt32".to_string());
-        metadata.insert("ask_count_1".to_string(), "UInt32".to_string());
-        metadata.insert("ask_count_2".to_string(), "UInt32".to_string());
-        metadata.insert("ask_count_3".to_string(), "UInt32".to_string());
-        metadata.insert("ask_count_4".to_string(), "UInt32".to_string());
-        metadata.insert("ask_count_5".to_string(), "UInt32".to_string());
-        metadata.insert("ask_count_6".to_string(), "UInt32".to_string());
-        metadata.insert("ask_count_7".to_string(), "UInt32".to_string());
-        metadata.insert("ask_count_8".to_string(), "UInt32".to_string());
-        metadata.insert("ask_count_9".to_string(), "UInt32".to_string());
+
+        for name in ["bid_price", "ask_price", "bid_size", "ask_size"] {
+            for level in 0..DEPTH10_LEN {
+                metadata.insert(format!("{name}_{level}"), FIXED_SIZE_BINARY.to_string());
+            }
+        }
+
+        for name in ["bid_count", "ask_count"] {
+            for level in 0..DEPTH10_LEN {
+                metadata.insert(format!("{name}_{level}"), "UInt32".to_string());
+            }
+        }
+
         metadata.insert("flags".to_string(), "UInt8".to_string());
         metadata.insert("sequence".to_string(), "UInt64".to_string());
         metadata.insert("ts_event".to_string(), "UInt64".to_string());
@@ -517,10 +455,11 @@ mod tests {
 
     #[rstest]
     fn test_order_book_depth10_serializable_trait() {
+        fn assert_serializable<T: Serializable>(_: &T) {}
+
         let depth = create_test_depth10();
 
         // Verify Serializable trait is implemented (compile-time check)
-        fn assert_serializable<T: Serializable>(_: &T) {}
         assert_serializable(&depth);
     }
 
@@ -730,7 +669,7 @@ mod tests {
             [5; DEPTH10_LEN], // Realistic order count
             [3; DEPTH10_LEN],
             16,                                         // Realistic flags
-            123456,                                     // Realistic sequence
+            123_456,                                    // Realistic sequence
             UnixNanos::from(1_672_531_200_000_000_000), // Jan 1, 2023 timestamp
             UnixNanos::from(1_672_531_200_000_100_000),
         );

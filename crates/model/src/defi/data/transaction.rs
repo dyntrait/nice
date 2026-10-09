@@ -1,14 +1,4 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : transaction.rs.rs
-//  @Author       : dyntrait Created On 2026/1/5 14:35
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 use alloy_primitives::{Address, U256};
 use serde::{Deserialize, Deserializer};
@@ -18,10 +8,7 @@ use crate::defi::{chain::Chain, hex::deserialize_hex_number};
 /// Represents a transaction on an EVM based blockchain.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nautilus_trader.core.nautilus_pyo3.model")
-)]
+
 pub struct Transaction {
     /// The blockchain network identifier where this transaction occurred.
     #[serde(rename = "chainId", deserialize_with = "deserialize_chain")]
@@ -50,7 +37,8 @@ pub struct Transaction {
 
 impl Transaction {
     /// Creates a new [`Transaction`] instance with the specified properties.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
+    #[must_use]
     pub const fn new(
         chain: Chain,
         hash: String,
@@ -70,10 +58,10 @@ impl Transaction {
             block_number,
             from,
             to,
+            value,
+            transaction_index,
             gas,
             gas_price,
-            transaction_index,
-            value,
         }
     }
 }
@@ -87,7 +75,7 @@ pub fn deserialize_chain<'de, D>(deserializer: D) -> Result<Chain, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let hex_string = String::deserialize(deserializer)?;
+    let hex_string: std::borrow::Cow<'de, str> = Deserialize::deserialize(deserializer)?;
     let without_prefix = hex_string.trim_start_matches("0x");
     let chain_id = u32::from_str_radix(without_prefix, 16).map_err(serde::de::Error::custom)?;
 
@@ -128,7 +116,7 @@ mod tests {
                 "value": "0x5f5e100"
             }
         }"#
-            .to_string()
+        .to_string()
     }
 
     #[fixture]
@@ -160,7 +148,7 @@ mod tests {
                 "yParity": "0x1"
             }
         }"#
-            .to_string()
+        .to_string()
     }
 
     #[rstest]
@@ -180,7 +168,7 @@ mod tests {
             tx.block_hash,
             "0xfdba50e306d1b0ebd1971ec0440799b324229841637d8c56afbd1d6950bb09f0"
         );
-        assert_eq!(tx.block_number, 22323670);
+        assert_eq!(tx.block_number, 22_323_670);
         assert_eq!(
             tx.from,
             "0xd6a8749e224ecdfcc79d473d3355b1b0eb51d423"
@@ -194,9 +182,9 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(tx.gas, U256::from(21000));
-        assert_eq!(tx.gas_price, U256::from(762999156));
+        assert_eq!(tx.gas_price, U256::from(762_999_156));
         assert_eq!(tx.transaction_index, 153);
-        assert_eq!(tx.value, U256::from(100000000));
+        assert_eq!(tx.value, U256::from(100_000_000));
     }
 
     #[rstest]
@@ -228,8 +216,8 @@ mod tests {
                 .parse::<Address>()
                 .unwrap()
         );
-        assert_eq!(tx.gas, U256::from(15000000));
-        assert_eq!(tx.gas_price, U256::from(1399572700));
+        assert_eq!(tx.gas, U256::from(15_000_000));
+        assert_eq!(tx.gas_price, U256::from(1_399_572_700));
         assert_eq!(tx.transaction_index, 74);
         assert_eq!(tx.value, U256::ZERO);
     }
@@ -263,7 +251,7 @@ mod tests {
         assert_eq!(tx.gas, U256::from(u64::MAX));
         assert_eq!(tx.gas_price, U256::from(1_000_000_000_000_000_000u64)); // 1 ETH in wei
         assert_eq!(tx.value, U256::from(1_000_000_000_000_000_000u64)); // 1 ETH in wei
-        assert_eq!(tx.block_number, 16777216); // 0x1000000
+        assert_eq!(tx.block_number, 16_777_216); // 0x1000000
     }
 
     #[rstest]
@@ -328,7 +316,7 @@ mod tests {
             chain,
             "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890".to_string(),
             "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
-            123456,
+            123_456,
             from_addr,
             to_addr,
             U256::from(21_000),

@@ -1,17 +1,4 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2026  dyntrait  All rights reserved.
-//  All Rights Reserved
-//
-//  @File         : snapshot.rs
-//  @Author       : dyntrait
-//   @Create       : ${DATE} ${TIME}
-//  @Description  :
-//
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 use indexmap::IndexMap;
 use nice_core::{UUID4, UnixNanos};
@@ -34,10 +21,7 @@ use crate::{
 
 /// Represents an order state snapshot as a certain instant.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nice_trader.core.nice_pyo3.model")
-)]
+
 pub struct OrderSnapshot {
     /// The trader ID associated with the order.
     pub trader_id: TraderId,
@@ -63,15 +47,19 @@ pub struct OrderSnapshot {
     pub quantity: Quantity,
     /// The order price (LIMIT).
     pub price: Option<Price>,
+    /// The order activation price for trailing-stop orders.
+    pub activation_price: Option<Price>,
     /// The order trigger price (STOP).
     pub trigger_price: Option<Price>,
     /// The trigger type for the order.
+    #[serde(default, with = "crate::enums::serde_option_trigger_type")]
     pub trigger_type: Option<TriggerType>,
     /// The trailing offset for the orders limit price.
     pub limit_offset: Option<Decimal>,
     /// The trailing offset for the orders trigger price (STOP).
     pub trailing_offset: Option<Decimal>,
     /// The trailing offset type.
+    #[serde(default, with = "crate::enums::serde_option_trailing_offset_type")]
     pub trailing_offset_type: Option<TrailingOffsetType>,
     /// The order time in force.
     pub time_in_force: TimeInForce,
@@ -82,9 +70,9 @@ pub struct OrderSnapshot {
     /// The order liquidity side.
     pub liquidity_side: Option<LiquiditySide>,
     /// The order average fill price.
-    pub avg_px: Option<f64>,
+    pub avg_px: Option<Decimal>,
     /// The order total price slippage.
-    pub slippage: Option<f64>,
+    pub slippage: Option<Decimal>,
     /// The commissions for the order.
     pub commissions: Vec<Money>,
     /// The order status.
@@ -98,10 +86,12 @@ pub struct OrderSnapshot {
     /// The quantity of the `LIMIT` order to display on the public book (iceberg).
     pub display_qty: Option<Quantity>,
     /// The order emulation trigger type.
+    #[serde(default, with = "crate::enums::serde_option_trigger_type")]
     pub emulation_trigger: Option<TriggerType>,
     /// The order emulation trigger instrument ID (will be `instrument_id` if `None`).
     pub trigger_instrument_id: Option<InstrumentId>,
     /// The orders contingency type.
+    #[serde(default, with = "crate::enums::serde_option_contingency_type")]
     pub contingency_type: Option<ContingencyType>,
     /// The order list ID associated with the order.
     pub order_list_id: Option<OrderListId>,
@@ -123,6 +113,9 @@ pub struct OrderSnapshot {
     pub ts_init: UnixNanos,
     /// UNIX timestamp (nanoseconds) when the last event occurred.
     pub ts_last: UnixNanos,
+    /// The causation ID associated with the snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub causation_id: Option<UUID4>,
 }
 
 impl From<OrderAny> for OrderSnapshot {
@@ -140,6 +133,7 @@ impl From<OrderAny> for OrderSnapshot {
             order_side: order.order_side(),
             quantity: order.quantity(),
             price: order.price(),
+            activation_price: order.activation_price(),
             trigger_price: order.trigger_price(),
             trigger_type: order.trigger_type(),
             limit_offset: order.limit_offset(),
@@ -170,6 +164,105 @@ impl From<OrderAny> for OrderSnapshot {
             init_id: order.init_id(),
             ts_init: order.ts_init(),
             ts_last: order.ts_last(),
+            causation_id: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use rstest::rstest;
+
+    use super::*;
+    use crate::orders::OrderTestBuilder;
+
+    #[rstest]
+    fn test_snapshot_from_market_order() {
+        let order = OrderTestBuilder::new(OrderType::Market)
+            .instrument_id(InstrumentId::from("EURUSD.SIM"))
+            .side(OrderSide::Buy)
+            .quantity(Quantity::from(100))
+            .build();
+
+        let snapshot = OrderSnapshot::from(order.clone());
+
+        assert_eq!(snapshot.trader_id, order.trader_id());
+        assert_eq!(snapshot.strategy_id, order.strategy_id());
+        assert_eq!(snapshot.instrument_id, order.instrument_id());
+        assert_eq!(snapshot.client_order_id, order.client_order_id());
+        assert_eq!(snapshot.venue_order_id, order.venue_order_id());
+        assert_eq!(snapshot.order_side, order.order_side());
+        assert_eq!(snapshot.order_type, order.order_type());
+        assert_eq!(snapshot.quantity, order.quantity());
+        assert_eq!(snapshot.status, order.status());
+        assert_eq!(snapshot.ts_init, order.ts_init());
+        assert_eq!(snapshot.ts_last, order.ts_last());
+        assert_eq!(snapshot.filled_qty, order.filled_qty());
+        assert!(!snapshot.is_post_only);
+        assert!(!snapshot.is_quote_quantity);
+    }
+
+    #[rstest]
+    fn test_snapshot_serde_round_trip_keeps_avg_px_and_slippage_exact() {
+        let order = OrderTestBuilder::new(OrderType::Market)
+            .instrument_id(InstrumentId::from("EURUSD.SIM"))
+            .side(OrderSide::Buy)
+            .quantity(Quantity::from(100))
+            .build();
+        let mut snapshot = OrderSnapshot::from(order);
+        snapshot.avg_px = Some(Decimal::from_str("1.6666666666666666666666666667").unwrap());
+        snapshot.slippage = Some(Decimal::from_str("0.0000000000000000000000000001").unwrap());
+
+        let json = serde_json::to_value(&snapshot).unwrap();
+        let decoded: OrderSnapshot = serde_json::from_value(json.clone()).unwrap();
+
+        // Serialized as strings, so the payload itself cannot round through a float
+        assert_eq!(json["avg_px"], "1.6666666666666666666666666667");
+        assert_eq!(json["slippage"], "0.0000000000000000000000000001");
+        assert_eq!(decoded, snapshot);
+    }
+
+    #[rstest]
+    fn test_snapshot_deserializes_legacy_float_avg_px_and_slippage() {
+        // Legacy payloads carry `avg_px` and `slippage` as JSON floats rather than decimal
+        // strings, so `from_dict` must keep accepting both forms.
+        let order = OrderTestBuilder::new(OrderType::Market)
+            .instrument_id(InstrumentId::from("EURUSD.SIM"))
+            .side(OrderSide::Buy)
+            .quantity(Quantity::from(100))
+            .build();
+        let mut snapshot = OrderSnapshot::from(order);
+        snapshot.avg_px = Some(Decimal::from_str("1.07").unwrap());
+        snapshot.slippage = Some(Decimal::from_str("0.07").unwrap());
+
+        let mut json = serde_json::to_value(&snapshot).unwrap();
+        json["avg_px"] = serde_json::json!(1.07);
+        json["slippage"] = serde_json::json!(0.07);
+        let decoded: OrderSnapshot = serde_json::from_value(json).unwrap();
+
+        assert_eq!(decoded, snapshot);
+    }
+
+    #[rstest]
+    fn test_snapshot_from_limit_order() {
+        let order = OrderTestBuilder::new(OrderType::Limit)
+            .instrument_id(InstrumentId::from("BTCUSDT.BINANCE"))
+            .side(OrderSide::Sell)
+            .quantity(Quantity::from("0.5"))
+            .price(Price::from("50000"))
+            .build();
+
+        let snapshot = OrderSnapshot::from(order);
+
+        assert_eq!(snapshot.order_type, OrderType::Limit);
+        assert_eq!(snapshot.order_side, OrderSide::Sell);
+        assert_eq!(snapshot.price, Some(Price::from("50000")));
+        assert_eq!(
+            snapshot.instrument_id,
+            InstrumentId::from("BTCUSDT.BINANCE")
+        );
+        assert_eq!(snapshot.quantity, Quantity::from("0.5"));
     }
 }

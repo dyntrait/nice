@@ -1,17 +1,4 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2026  dyntrait  All rights reserved.
-//  All Rights Reserved
-//
-//  @File         : close.rs
-//  @Author       : dyntrait
-//   @Create       : ${DATE} ${TIME}
-//  @Description  :
-//
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 //! An `InstrumentClose` data type representing an instrument close at a venue.
 
@@ -32,10 +19,6 @@ use crate::{
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type")]
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nice_trader.core.nice_pyo3.model")
-)]
 pub struct InstrumentClose {
     /// The instrument ID.
     pub instrument_id: InstrumentId,
@@ -51,6 +34,7 @@ pub struct InstrumentClose {
 
 impl InstrumentClose {
     /// Creates a new [`InstrumentClose`] instance.
+    #[must_use]
     pub fn new(
         instrument_id: InstrumentId,
         close_price: Price,

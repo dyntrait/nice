@@ -1,41 +1,27 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2015-2026  dyntrait  All rights reserved.
-//  All Rights Reserved
-//
-//  @File         : clock.rs
-//  @Author       : dyntrait
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 //! Time sources for rate limiters.
 //!
-//! The time sources contained in this module allow the rate limiter
-//! to be (optionally) independent of std, and additionally
-//! allow mocking the passage of time.
-//!
-//! You can supply a custom time source by implementing both [`Reference`]
-//! and [`Clock`] for your own types, and by implementing `Add<Nanos>` for
-//! your [`Reference`] type:
+//! Custom time sources implement [`Reference`], [`Clock`], and `Add<Nanos>`. This supports
+//! deterministic tests without coupling rate-limiting decisions to wall-clock time.
+
 use std::{
     fmt::Debug,
+    future::Future,
     ops::Add,
-    prelude::v1::*,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use super::nanos::Nanos;
+use crate::dst::time::Instant;
 
 /// A measurement from a clock.
 pub trait Reference:
-Sized + Add<Nanos, Output = Self> + PartialEq + Eq + Ord + Copy + Clone + Send + Sync + Debug
+    Sized + Add<Nanos, Output = Self> + PartialEq + Eq + Ord + Copy + Clone + Send + Sync + Debug
 {
     /// Determines the time that separates two measurements of a
     /// clock. Implementations of this must perform a saturating
@@ -57,14 +43,19 @@ pub trait Clock: Clone {
 
     /// Returns a measurement of the clock.
     fn now(&self) -> Self::Instant;
+
+    /// Waits for `duration` on this clock's time base.
+    ///
+    /// Implementations must advance on the same clock as [`Clock::now`] so
+    /// callers using `sleep` together with `now` observe consistent time
+    /// under both real and simulated runtimes.
+    fn sleep(&self, duration: Duration) -> impl Future<Output = ()> + Send + '_;
 }
 
 impl Reference for Duration {
     /// The internal duration between this point and another.
     fn duration_since(&self, earlier: Self) -> Nanos {
-        self.checked_sub(earlier)
-            .unwrap_or_else(|| Self::new(0, 0))
-            .into()
+        (*self).saturating_sub(earlier).into()
     }
 
     /// The internal duration between this point and another.
@@ -109,6 +100,7 @@ impl FakeRelativeClock {
 
         let mut prev = self.now.load(Ordering::Acquire);
         let mut next = prev + by;
+
         while let Err(e) =
             self.now
                 .compare_exchange_weak(prev, next, Ordering::Release, Ordering::Relaxed)
@@ -130,6 +122,11 @@ impl Clock for FakeRelativeClock {
 
     fn now(&self) -> Self::Instant {
         self.now.load(Ordering::Relaxed).into()
+    }
+
+    fn sleep(&self, duration: Duration) -> impl Future<Output = ()> + Send + '_ {
+        self.advance(duration);
+        std::future::ready(())
     }
 }
 
@@ -166,6 +163,13 @@ impl Clock for MonotonicClock {
     fn now(&self) -> Self::Instant {
         Instant::now()
     }
+
+    async fn sleep(&self, duration: Duration) {
+        #[cfg(not(all(feature = "simulation", madsim)))]
+        tokio::time::sleep(duration).await;
+        #[cfg(all(feature = "simulation", madsim))]
+        madsim::time::sleep(duration).await;
+    }
 }
 
 #[cfg(test)]
@@ -182,6 +186,7 @@ mod test {
         let threads = std::iter::repeat_n((), 10)
             .map(move |()| {
                 let clock = Arc::clone(&clock);
+
                 thread::spawn(move || {
                     for _ in 0..1_000_000 {
                         let now = clock.now();
@@ -191,6 +196,7 @@ mod test {
                 })
             })
             .collect::<Vec<_>>();
+
         for t in threads {
             t.join().unwrap();
         }
@@ -201,5 +207,23 @@ mod test {
         let d = Duration::from_secs(1);
         let one_ns = Nanos::from(1);
         assert!(d + one_ns > d);
+    }
+
+    // Under madsim, `MonotonicClock::sleep` runs on the virtual clock with
+    // sub-ms scheduling epsilon. If the cfg gate fell through to real tokio,
+    // `sleep` would block on the OS scheduler with ~5-15ms of jitter and the
+    // tight upper bound would fail.
+    #[cfg(all(feature = "simulation", madsim))]
+    #[madsim::test]
+    async fn test_monotonic_clock_sleep_uses_virtual_time() {
+        let clock = MonotonicClock;
+        let start = Instant::now();
+        clock.sleep(Duration::from_millis(100)).await;
+        let elapsed = start.elapsed();
+        assert!(elapsed >= Duration::from_millis(100));
+        assert!(
+            elapsed < Duration::from_millis(101),
+            "virtual sleep showed real-tokio jitter: {elapsed:?}"
+        );
     }
 }

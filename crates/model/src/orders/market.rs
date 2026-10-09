@@ -1,14 +1,4 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : market.rs.rs
-//  @Author       : dyntrait Created On 2026/1/5 14:05
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 use std::{
     fmt::Display,
@@ -40,10 +30,6 @@ use crate::{
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nice_trader.core.nice_pyo3.model")
-)]
 pub struct MarketOrder {
     core: OrderCore,
     pub protection_price: Option<Price>,
@@ -57,7 +43,8 @@ impl MarketOrder {
     /// Returns an error if:
     /// - The `quantity` is not positive.
     /// - The `time_in_force` is GTD (invalid for market orders).
-    #[allow(clippy::too_many_arguments)]
+    /// - The order metadata violates an [`OrderInitialized::new_checked`] invariant.
+    #[expect(clippy::too_many_arguments)]
     pub fn new_checked(
         trader_id: TraderId,
         strategy_id: StrategyId,
@@ -78,14 +65,14 @@ impl MarketOrder {
         exec_algorithm_params: Option<IndexMap<Ustr, Ustr>>,
         exec_spawn_id: Option<ClientOrderId>,
         tags: Option<Vec<Ustr>>,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, OrderError> {
         check_positive_quantity(quantity, stringify!(quantity))?;
         check_predicate_false(
             time_in_force == TimeInForce::Gtd,
             "GTD not supported for Market orders",
         )?;
 
-        let init_order = OrderInitialized::new(
+        let init_order = OrderInitialized::new_checked(
             trader_id,
             strategy_id,
             instrument_id,
@@ -103,7 +90,8 @@ impl MarketOrder {
             ts_init,
             None,
             None,
-            Some(TriggerType::NoTrigger),
+            None,
+            None,
             None,
             None,
             None,
@@ -119,7 +107,7 @@ impl MarketOrder {
             exec_algorithm_params,
             exec_spawn_id,
             tags,
-        );
+        )?;
 
         Ok(Self {
             core: OrderCore::new(init_order),
@@ -132,7 +120,8 @@ impl MarketOrder {
     /// # Panics
     ///
     /// Panics if any order validation fails (see [`MarketOrder::new_checked`]).
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         trader_id: TraderId,
         strategy_id: StrategyId,
@@ -175,7 +164,7 @@ impl MarketOrder {
             exec_spawn_id,
             tags,
         )
-            .expect(FAILED)
+        .unwrap_or_else(|e| panic!("{FAILED}: {e}"))
     }
 }
 
@@ -360,6 +349,10 @@ impl Order for MarketOrder {
         self.filled_qty
     }
 
+    fn voided_qty(&self) -> Quantity {
+        self.voided_qty
+    }
+
     fn leaves_qty(&self) -> Quantity {
         self.leaves_qty
     }
@@ -368,11 +361,11 @@ impl Order for MarketOrder {
         self.overfill_qty
     }
 
-    fn avg_px(&self) -> Option<f64> {
+    fn avg_px(&self) -> Option<Decimal> {
         self.avg_px
     }
 
-    fn slippage(&self) -> Option<f64> {
+    fn slippage(&self) -> Option<Decimal> {
         self.slippage
     }
 
@@ -401,11 +394,11 @@ impl Order for MarketOrder {
     }
 
     fn apply(&mut self, event: OrderEventAny) -> Result<(), OrderError> {
+        self.core.apply(event.clone())?;
+
         if let OrderEventAny::Updated(ref event) = event {
             self.update(event);
-        };
-
-        self.core.apply(event)?;
+        }
 
         Ok(())
     }
@@ -418,7 +411,9 @@ impl Order for MarketOrder {
             OrderError::InvalidOrderEvent
         );
 
-        self.protection_price = event.protection_price;
+        if let Some(protection_price) = event.protection_price {
+            self.protection_price = Some(protection_price);
+        }
         self.quantity = event.quantity;
         self.leaves_qty = self.quantity.saturating_sub(self.filled_qty);
     }
@@ -514,9 +509,11 @@ impl Display for MarketOrder {
     }
 }
 
-impl From<OrderInitialized> for MarketOrder {
-    fn from(event: OrderInitialized) -> Self {
-        Self::new(
+impl TryFrom<OrderInitialized> for MarketOrder {
+    type Error = OrderError;
+
+    fn try_from(event: OrderInitialized) -> Result<Self, Self::Error> {
+        Self::new_checked(
             event.trader_id,
             event.strategy_id,
             event.instrument_id,
@@ -542,13 +539,19 @@ impl From<OrderInitialized> for MarketOrder {
 
 #[cfg(test)]
 mod tests {
+    use nice_core::{UUID4, UnixNanos, correctness::CorrectnessError};
     use rstest::rstest;
 
     use crate::{
-        enums::{OrderSide, OrderType, TimeInForce},
-        events::{OrderEventAny, OrderUpdated, order::initialized::OrderInitializedBuilder},
+        enums::{ContingencyType, OrderSide, OrderType, TimeInForce},
+        events::{
+            OrderEventAny, OrderInitialized, OrderUpdated, order::spec::OrderInitializedSpec,
+        },
+        identifiers::{ClientOrderId, ExecAlgorithmId, InstrumentId, StrategyId, TraderId},
         instruments::{CurrencyPair, stubs::*},
-        orders::{MarketOrder, Order, builder::OrderTestBuilder, stubs::TestOrderStubs},
+        orders::{
+            MarketOrder, Order, OrderError, builder::OrderTestBuilder, stubs::TestOrderStubs,
+        },
         types::{Price, Quantity},
     };
 
@@ -591,6 +594,73 @@ mod tests {
     }
 
     #[rstest]
+    fn test_direct_market_order_rejects_contingency_without_linked_orders(
+        audusd_sim: CurrencyPair,
+    ) {
+        let result =
+            market_order_with_metadata(audusd_sim.id, Some(ContingencyType::Oco), None, None, None);
+
+        let Err(OrderError::Invariant(CorrectnessError::PredicateViolation { message })) = result
+        else {
+            panic!("expected a predicate violation, was {result:?}");
+        };
+        assert_eq!(
+            message,
+            "`linked_order_ids` is required for contingent orders"
+        );
+    }
+
+    #[rstest]
+    fn test_direct_market_order_rejects_exec_algorithm_without_spawn(audusd_sim: CurrencyPair) {
+        let result = market_order_with_metadata(
+            audusd_sim.id,
+            None,
+            None,
+            Some(ExecAlgorithmId::from("TWAP")),
+            None,
+        );
+
+        let Err(OrderError::Invariant(CorrectnessError::PredicateViolation { message })) = result
+        else {
+            panic!("expected a predicate violation, was {result:?}");
+        };
+        assert_eq!(
+            message,
+            "`exec_spawn_id` is required when `exec_algorithm_id` is set"
+        );
+    }
+
+    #[rstest]
+    #[case(
+        OrderInitialized {
+            contingency_type: Some(ContingencyType::Oco),
+            linked_order_ids: None,
+            ..OrderInitialized::default()
+        },
+        "`linked_order_ids` is required for contingent orders"
+    )]
+    #[case(
+        OrderInitialized {
+            exec_algorithm_id: Some(ExecAlgorithmId::from("TWAP")),
+            exec_spawn_id: None,
+            ..OrderInitialized::default()
+        },
+        "`exec_spawn_id` is required when `exec_algorithm_id` is set"
+    )]
+    fn test_market_order_reconstruction_rejects_invalid_metadata(
+        #[case] event: OrderInitialized,
+        #[case] expected: &str,
+    ) {
+        let result = MarketOrder::try_from(event);
+
+        let Err(OrderError::Invariant(CorrectnessError::PredicateViolation { message })) = result
+        else {
+            panic!("expected a predicate violation, was {result:?}");
+        };
+        assert_eq!(message, expected);
+    }
+
+    #[rstest]
     fn test_market_order_update(audusd_sim: CurrencyPair) {
         // Create and accept a basic MarketOrder
         let order = OrderTestBuilder::new(OrderType::Market)
@@ -618,18 +688,54 @@ mod tests {
     }
 
     #[rstest]
+    #[case(Some(Price::new(95.0, 2)), None)]
+    #[case(None, Some(Price::new(95.0, 2)))]
+    fn test_market_order_rejects_invalid_update_atomically(
+        audusd_sim: CurrencyPair,
+        #[case] price: Option<Price>,
+        #[case] trigger_price: Option<Price>,
+    ) {
+        let order = OrderTestBuilder::new(OrderType::Market)
+            .instrument_id(audusd_sim.id)
+            .quantity(Quantity::from(10))
+            .side(OrderSide::Buy)
+            .build();
+        let mut accepted_order = TestOrderStubs::make_accepted_order(&order);
+        let state = (
+            accepted_order.status(),
+            accepted_order.previous_status(),
+            accepted_order.ts_last(),
+            accepted_order.events().len(),
+        );
+        let event = OrderUpdated {
+            client_order_id: accepted_order.client_order_id(),
+            strategy_id: accepted_order.strategy_id(),
+            price,
+            trigger_price,
+            ..Default::default()
+        };
+
+        let result = accepted_order.apply(OrderEventAny::Updated(event));
+
+        assert!(matches!(result, Err(OrderError::InvalidOrderEvent)));
+        assert_eq!(accepted_order.status(), state.0);
+        assert_eq!(accepted_order.previous_status(), state.1);
+        assert_eq!(accepted_order.ts_last(), state.2);
+        assert_eq!(accepted_order.events().len(), state.3);
+    }
+
+    #[rstest]
     fn test_market_order_from_order_initialized(audusd_sim: CurrencyPair) {
         // Create an OrderInitialized event with all required fields for a MarketOrder
-        let order_initialized = OrderInitializedBuilder::default()
+        let order_initialized = OrderInitializedSpec::builder()
             .order_type(OrderType::Market)
             .instrument_id(audusd_sim.id)
             .quantity(Quantity::from(10))
             .order_side(OrderSide::Buy)
-            .build()
-            .unwrap();
+            .build();
 
         // Convert the OrderInitialized event into a MarketOrder
-        let order: MarketOrder = order_initialized.clone().into();
+        let order: MarketOrder = order_initialized.clone().try_into().unwrap();
 
         // Assert essential fields match the OrderInitialized fields
         assert_eq!(order.trader_id(), order_initialized.trader_id);
@@ -704,5 +810,35 @@ mod tests {
         // Verify updates were applied correctly
         assert_eq!(accepted_order.price(), Some(calculated_protection_price));
         assert!(accepted_order.has_price());
+    }
+
+    fn market_order_with_metadata(
+        instrument_id: InstrumentId,
+        contingency_type: Option<ContingencyType>,
+        linked_order_ids: Option<Vec<ClientOrderId>>,
+        exec_algorithm_id: Option<ExecAlgorithmId>,
+        exec_spawn_id: Option<ClientOrderId>,
+    ) -> Result<MarketOrder, OrderError> {
+        MarketOrder::new_checked(
+            TraderId::from("TRADER-001"),
+            StrategyId::from("S-001"),
+            instrument_id,
+            ClientOrderId::from("O-001"),
+            OrderSide::Buy,
+            Quantity::from(1),
+            TimeInForce::Gtc,
+            UUID4::new(),
+            UnixNanos::default(),
+            false,
+            false,
+            contingency_type,
+            None,
+            linked_order_ids,
+            None,
+            exec_algorithm_id,
+            None,
+            exec_spawn_id,
+            None,
+        )
     }
 }

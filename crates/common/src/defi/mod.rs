@@ -1,17 +1,5 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : mod.rs.rs
-//  @Author       : dyntrait Created On 2026/1/5 15:13
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
 
-
-//! DeFi (Decentralized Finance) integration for NautilusTrader.
+//! DeFi (Decentralized Finance) integration for niceTrader.
 //!
 //! This module provides centralized access to DeFi functionality throughout the common crate.
 //! DeFi support includes:
@@ -20,12 +8,14 @@
 //!
 //! All DeFi functionality requires the `defi` feature flag to be enabled:
 //! ```toml
-//! nautilus-common = { version = "0.x", features = ["defi"] }
+//! nice-common = { version = "0.x", features = ["defi"] }
 //! ```
 
 pub mod cache;
 pub mod data_actor;
 pub mod switchboard;
+
+pub(crate) mod msgbus;
 
 // Re-exports
 // Re-exports

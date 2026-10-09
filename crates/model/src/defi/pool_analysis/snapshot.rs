@@ -1,16 +1,7 @@
-// -------------------------------------------------------------------------------------------------
-//  Copyright (c) 2025-2026 dyntrait. All rights reserved.
-//
-//  @File         : snapshot.rs.rs
-//  @Author       : dyntrait Created On 2026/1/5 14:40
-//  @Description  : 
-//
-//  Licensed under the GNU Lesser General Public License Version 3.0 (the "License");
-//  You may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at https://www.gnu.org/licenses/lgpl-3.0.en.html
-// -------------------------------------------------------------------------------------------------
+
 
 use alloy_primitives::{U160, U256};
+use nice_core::UnixNanos;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -20,15 +11,15 @@ use crate::{
     identifiers::InstrumentId,
 };
 
+/// Protocol-fee denominator for basis-point fee shares.
+pub const PROTOCOL_FEE_BASIS_POINTS_DENOMINATOR: u32 = 10_000;
+
 /// Complete snapshot of a liquidity pool's state at a specific point in time.
 ///
-/// `PoolSnapshot` provides a comprehensive, self-contained representation of a pool's
+/// `PoolSnapshot` provides a self-contained representation of a pool's
 /// entire state, bundling together the global state variables, all liquidity positions,
 /// and the complete tick distribution.
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nautilus_trader.core.nautilus_pyo3.model")
-)]
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PoolSnapshot {
     /// The instrument ID of the pool this snapshot represents.
@@ -43,10 +34,18 @@ pub struct PoolSnapshot {
     pub analytics: PoolAnalytics,
     /// Block position where this snapshot was taken.
     pub block_position: BlockPosition,
+    /// UNIX timestamp (nanoseconds) when the snapshot event occurred.
+    #[serde(default)]
+    pub ts_event: UnixNanos,
+    /// UNIX timestamp (nanoseconds) when the instance was created.
+    #[serde(default)]
+    pub ts_init: UnixNanos,
 }
 
 impl PoolSnapshot {
     /// Creates a new `PoolSnapshot` with the specified parameters.
+    #[must_use]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         instrument_id: InstrumentId,
         state: PoolState,
@@ -54,6 +53,8 @@ impl PoolSnapshot {
         ticks: Vec<PoolTick>,
         analytics: PoolAnalytics,
         block_position: BlockPosition,
+        ts_event: UnixNanos,
+        ts_init: UnixNanos,
     ) -> Self {
         Self {
             instrument_id,
@@ -62,6 +63,8 @@ impl PoolSnapshot {
             ticks,
             analytics,
             block_position,
+            ts_event,
+            ts_init,
         }
     }
 }
@@ -71,10 +74,7 @@ impl PoolSnapshot {
 /// `PoolState` encapsulates the core global variables that define a UniswapV3-style
 /// AMM pool's current state. This includes the current price position, cumulative
 /// deposit/withdrawal flows, and protocol fee configuration.
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nautilus_trader.core.nautilus_pyo3.model")
-)]
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PoolState {
     /// Current tick position of the pool price.
@@ -89,6 +89,12 @@ pub struct PoolState {
     pub protocol_fees_token1: U256,
     /// Protocol fee packed: lower 4 bits for token0, upper 4 bits for token1.
     pub fee_protocol: u8,
+    /// Token0 protocol-fee share in basis points, when applicable.
+    #[serde(default)]
+    pub fee_protocol0_basis_points: Option<u32>,
+    /// Token1 protocol-fee share in basis points, when applicable.
+    #[serde(default)]
+    pub fee_protocol1_basis_points: Option<u32>,
     /// Global fee growth for token0 as Q128.128 fixed-point number.
     pub fee_growth_global_0: U256,
     /// Global fee growth for token1 as Q128.128 fixed-point number.
@@ -97,6 +103,7 @@ pub struct PoolState {
 
 impl PoolState {
     /// Creates a new `PoolState` with the specified parameters.
+    #[must_use]
     pub fn new(protocol_fees_token0: U256, protocol_fees_token1: U256, fee_protocol: u8) -> Self {
         Self {
             current_tick: 0,
@@ -105,9 +112,45 @@ impl PoolState {
             protocol_fees_token0,
             protocol_fees_token1,
             fee_protocol,
+            fee_protocol0_basis_points: None,
+            fee_protocol1_basis_points: None,
             fee_growth_global_0: U256::ZERO,
             fee_growth_global_1: U256::ZERO,
         }
+    }
+
+    /// Returns the Uniswap V3 protocol-fee denominator for the input token.
+    #[must_use]
+    pub const fn uniswap_v3_fee_protocol(&self, zero_for_one: bool) -> u8 {
+        if zero_for_one {
+            self.fee_protocol % 16
+        } else {
+            self.fee_protocol >> 4
+        }
+    }
+
+    /// Returns the basis-point protocol-fee share for the input token, when applicable.
+    #[must_use]
+    pub const fn fee_protocol_basis_points(&self, zero_for_one: bool) -> Option<u32> {
+        if zero_for_one {
+            self.fee_protocol0_basis_points
+        } else {
+            self.fee_protocol1_basis_points
+        }
+    }
+
+    /// Sets the Uniswap V3 packed protocol-fee byte and clears the basis-point representation.
+    pub fn set_uniswap_v3_fee_protocol(&mut self, fee_protocol: u8) {
+        self.fee_protocol = fee_protocol;
+        self.fee_protocol0_basis_points = None;
+        self.fee_protocol1_basis_points = None;
+    }
+
+    /// Sets basis-point protocol-fee shares and clears the Uniswap packed byte.
+    pub fn set_protocol_fee_basis_points(&mut self, fee_protocol0: u32, fee_protocol1: u32) {
+        self.fee_protocol = 0;
+        self.fee_protocol0_basis_points = Some(fee_protocol0);
+        self.fee_protocol1_basis_points = Some(fee_protocol1);
     }
 }
 
@@ -120,6 +163,8 @@ impl Default for PoolState {
             protocol_fees_token0: U256::ZERO,
             protocol_fees_token1: U256::ZERO,
             fee_protocol: 0,
+            fee_protocol0_basis_points: None,
+            fee_protocol1_basis_points: None,
             fee_growth_global_0: U256::ZERO,
             fee_growth_global_1: U256::ZERO,
         }
@@ -130,10 +175,7 @@ impl Default for PoolState {
 ///
 /// It tracks cumulative statistics about pool activity, including
 /// deposit and collection flows, event counts, and performance metrics for debugging.
-#[cfg_attr(
-    feature = "python",
-    pyo3::pyclass(module = "nautilus_trader.core.nautilus_pyo3.model")
-)]
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PoolAnalytics {
     /// Total amount of token0 deposited through mints.

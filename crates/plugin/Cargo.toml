@@ -1,0 +1,40 @@
+[package]
+name = "nice-plugin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+authors.workspace = true
+license.workspace = true
+description = "Plug-in system for the nice trading engine"
+categories.workspace = true
+keywords.workspace = true
+documentation.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "nice_plugin"
+crate-type = ["rlib"]
+
+[features]
+default = []
+component-binding = ["dep:nice-core"]
+# Compatibility feature retained for downstream manifests
+host = []
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+nice-core = { workspace = true, optional = true }
+nice-model = { workspace = true }
+
+log = { workspace = true }
+
+[dev-dependencies]
+rstest = { workspace = true }

@@ -1,6 +1,6 @@
 # Variables
 # -----------------------------------------------------------------------------
-PROJECT?=nautechsystems/nautilus_trader
+PROJECT?=nautechsystems/Nice_trader
 REGISTRY?=ghcr.io/
 IMAGE?=$(REGISTRY)$(PROJECT)
 GIT_TAG:=$(shell git rev-parse --abbrev-ref HEAD)
@@ -46,19 +46,19 @@ RESET  := \033[0m
 .PHONY: install
 install: export BUILD_MODE=release
 install:  #-- Install in release mode with all dependencies and extras
-	$(info $(M) Installing NautilusTrader in release mode with all dependencies and extras...)
+	$(info $(M) Installing NiceTrader in release mode with all dependencies and extras...)
 	$Q uv sync --active --all-groups --all-extras --verbose
 
 .PHONY: install-debug
 install-debug: export BUILD_MODE=debug
 install-debug:  #-- Install in debug mode for development
-	$(info $(M) Installing NautilusTrader in debug mode for development...)
+	$(info $(M) Installing NiceTrader in debug mode for development...)
 	$Q uv sync --active --all-groups --all-extras --verbose
 
 .PHONY: install-just-deps
 install-just-deps:  #-- Install dependencies only without building the package
 	$(info $(M) Installing dependencies only without building the package...)
-	$Q uv sync --active --all-groups --all-extras --no-install-package nautilus_trader
+	$Q uv sync --active --all-groups --all-extras --no-install-package Nice_trader
 
 #== Build
 
@@ -313,8 +313,8 @@ cargo-test-coverage:  #-- Run Rust tests with coverage reporting
 # Invoke as:
 #   make cargo-test-crate-<crate_name>
 # Examples:
-#   make cargo-test-crate-nautilus-model
-#   make cargo-test-crate-nautilus-core FEATURES="python,ffi"
+#   make cargo-test-crate-Nice-model
+#   make cargo-test-crate-Nice-core FEATURES="python,ffi"
 #
 # This reuses the same flags as `cargo-test-lib` but targets only the specified
 # crate by replacing `--workspace` with `-p <crate>`.
@@ -340,7 +340,7 @@ cargo-test-coverage-crate-%:  #-- Run Rust tests with coverage reporting for a s
 #------------------------------------------------------------------------------
 
 # List of crates whose criterion/iai benches run in the performance workflow
-CI_BENCH_CRATES := nautilus-core nautilus-model nautilus-common nautilus-live
+CI_BENCH_CRATES := Nice-core Nice-model Nice-common Nice-live
 
 # NOTE:
 # - We invoke `cargo bench` *once per crate* to avoid the well-known
@@ -360,13 +360,13 @@ cargo-ci-benches:  #-- Run Rust benches for the crates included in the CI perfor
 #== Docker
 
 .PHONY: docker-build
-docker-build: clean  #-- Build Docker image for NautilusTrader
+docker-build: clean  #-- Build Docker image for NiceTrader
 	docker pull $(IMAGE_FULL) || docker pull $(IMAGE):nightly || true
-	docker build -f .docker/nautilus_trader.dockerfile --platform linux/x86_64 -t $(IMAGE_FULL) .
+	docker build -f .docker/Nice_trader.dockerfile --platform linux/x86_64 -t $(IMAGE_FULL) .
 
 .PHONY: docker-build-force
 docker-build-force:  #-- Force rebuild Docker image without cache
-	docker build --no-cache -f .docker/nautilus_trader.dockerfile -t $(IMAGE_FULL) .
+	docker build --no-cache -f .docker/Nice_trader.dockerfile -t $(IMAGE_FULL) .
 
 .PHONY: docker-push
 docker-push:  #-- Push Docker image to registry
@@ -406,7 +406,7 @@ purge-services:  #-- Purge all development services (stop containers and remove 
 .PHONY: init-db
 init-db:  #-- Initialize PostgreSQL database schema
 	$(info $(M) Initializing PostgreSQL database schema...)
-	cat schema/sql/types.sql schema/sql/tables.sql schema/sql/functions.sql schema/sql/partitions.sql | docker exec -i nautilus-database psql -U nautilus -d nautilus
+	cat schema/sql/types.sql schema/sql/tables.sql schema/sql/functions.sql schema/sql/partitions.sql | docker exec -i Nice-database psql -U Nice -d Nice
 
 #== Python Testing
 
@@ -422,14 +422,14 @@ test-performance:  #-- Run performance tests with codspeed benchmarking
 #== CLI Tools
 
 .PHONY: install-cli
-install-cli:  #-- Install Nautilus CLI tool from source
-	cargo install --path crates/cli --bin nautilus --locked --force
+install-cli:  #-- Install Nice CLI tool from source
+	cargo install --path crates/cli --bin Nice --locked --force
 
 #== Internal
 
 .PHONY: help
 help:  #-- Show this help message and exit
-	@printf "NautilusTrader Makefile\n\n"
+	@printf "NiceTrader Makefile\n\n"
 	@printf "$(GREEN)Usage:$(RESET) make $(CYAN)<target>$(RESET)\n\n"
 	@printf "$(GRAY)Tips: Use $(CYAN)make <target> V=1$(GRAY) for verbose output$(RESET)\n"
 	@printf "$(GRAY)      Use $(CYAN)make <target> VERBOSE=false$(GRAY) to disable verbose output for build-debug and cargo-test$(RESET)\n\n"
